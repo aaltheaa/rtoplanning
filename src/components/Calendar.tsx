@@ -186,11 +186,17 @@ function generateAutoVacations(
     }
   }
 
-  // Find all OOF days not covered by manual vacations
+  // Find all OOF days not covered by manual vacations (weekdays only)
   const oofDates: string[] = []
   for (const [dateStr, status] of Object.entries(dayStatus)) {
     if (status === 'oof' && !manualVacationDates.has(dateStr)) {
-      oofDates.push(dateStr)
+      // Only include weekdays (Mon-Fri)
+      const [year, month, day] = dateStr.split('-').map(Number)
+      const date = new Date(year, month - 1, day)
+      const dayOfWeek = date.getDay()
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        oofDates.push(dateStr)
+      }
     }
   }
 
@@ -1083,6 +1089,18 @@ export default function Calendar() {
             </p>
           </div>
         )}
+      </div>
+
+      {/* Footer */}
+      <div className="pt-8 pb-4 text-center">
+        <a
+          href="https://github.com/aaltheaa"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          made with vibes ❤️
+        </a>
       </div>
     </div>
   )
