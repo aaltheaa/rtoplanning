@@ -1,0 +1,910 @@
+'use client'
+
+import { useState, Fragment } from 'react'
+
+type AttendanceStatus = 'not-set' | 'office' | 'oof'
+
+interface VacationEvent {
+  id: string
+  name: string
+  startDate: string  // YYYY-MM-DD
+  endDate: string    // YYYY-MM-DD
+}
+
+type ComplianceImpact = 'ok' | 'at-risk' | 'not-allowed'
+
+const STATUS_CYCLE: AttendanceStatus[] = ['not-set', 'office', 'oof']
+
+const STATUS_STYLES: Record<AttendanceStatus, string> = {
+  'not-set': 'bg-white hover:bg-gray-50 border-gray-200',
+  'office': 'bg-gradient-to-br from-emerald-400 to-green-500 text-white shadow-sm',
+  'oof': 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-sm',
+}
+
+// SVG Icons
+const ChevronLeftIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+  </svg>
+)
+
+const ChevronRightIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+  </svg>
+)
+
+const PencilIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+  </svg>
+)
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+  </svg>
+)
+
+const CalendarIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" />
+  </svg>
+)
+
+const InfoIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+  </svg>
+)
+
+const IMPACT_STYLES: Record<ComplianceImpact, string> = {
+  'ok': 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 shadow-sm',
+  'at-risk': 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200 shadow-sm',
+  'not-allowed': 'bg-gradient-to-r from-red-50 to-rose-50 border-red-200 shadow-sm',
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+const REQUIRED_DAYS_PER_WEEK = 3
+const ROLLING_WINDOW_WEEKS = 12
+const REQUIRED_COMPLIANT_WEEKS = 8
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate()
+}
+
+function getFirstDayOfMonth(year: number, month: number): number {
+  return new Date(year, month, 1).getDay()
+}
+
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function dateKeyFromParts(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function getStartOfWeek(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  d.setDate(d.getDate() - day)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function getWeekNumber(date: Date, startWeekDate: Date | null): number | null {
+  if (!startWeekDate) return null
+  const startOfThisWeek = getStartOfWeek(date)
+  const startOfRefWeek = getStartOfWeek(startWeekDate)
+  if (startOfThisWeek < startOfRefWeek) return null
+  const diffTime = startOfThisWeek.getTime() - startOfRefWeek.getTime()
+  const diffWeeks = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000))
+  return diffWeeks + 1
+}
+
+function getWeekStartDate(weekNum: number, startWeekDate: Date): Date {
+  const start = getStartOfWeek(startWeekDate)
+  const result = new Date(start)
+  result.setDate(result.getDate() + (weekNum - 1) * 7)
+  return result
+}
+
+function getOfficeDaysInWeek(weekStartDate: Date, dayStatus: Record<string, AttendanceStatus>): number {
+  let officeDays = 0
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStartDate)
+    d.setDate(d.getDate() + i)
+    const dayOfWeek = d.getDay()
+    // Only count weekdays (Mon-Fri)
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      const key = dateKey(d)
+      if (dayStatus[key] === 'office') {
+        officeDays++
+      }
+    }
+  }
+  return officeDays
+}
+
+function getRollingCompliance(
+  weekNum: number,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>
+): { compliantWeeks: number; windowSize: number; isCompliant: boolean } {
+  const windowSize = Math.min(ROLLING_WINDOW_WEEKS, weekNum)
+  const startWeek = weekNum - windowSize + 1
+
+  let compliantWeeks = 0
+  for (let w = startWeek; w <= weekNum; w++) {
+    const weekStart = getWeekStartDate(w, startWeekDate)
+    const officeDays = getOfficeDaysInWeek(weekStart, dayStatus)
+    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
+      compliantWeeks++
+    }
+  }
+
+  // For full 12-week windows, need 8 compliant weeks
+  // For smaller windows (first 12 weeks), proportionally scale the requirement
+  const requiredForWindow = weekNum >= ROLLING_WINDOW_WEEKS
+    ? REQUIRED_COMPLIANT_WEEKS
+    : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
+
+  return {
+    compliantWeeks,
+    windowSize,
+    isCompliant: compliantWeeks >= requiredForWindow,
+  }
+}
+
+function getVacationDates(vacation: VacationEvent): string[] {
+  const dates: string[] = []
+  const start = new Date(vacation.startDate + 'T00:00:00')
+  const end = new Date(vacation.endDate + 'T00:00:00')
+  const current = new Date(start)
+  while (current <= end) {
+    dates.push(dateKey(current))
+    current.setDate(current.getDate() + 1)
+  }
+  return dates
+}
+
+function getAffectedWeeks(vacation: VacationEvent, startWeekDate: Date): number[] {
+  const vacationDates = getVacationDates(vacation)
+  const weekNumbers = new Set<number>()
+  for (const dateStr of vacationDates) {
+    const [year, month, day] = dateStr.split('-').map(Number)
+    const date = new Date(year, month - 1, day)
+    const weekNum = getWeekNumber(date, startWeekDate)
+    if (weekNum !== null && weekNum >= 1) {
+      weekNumbers.add(weekNum)
+    }
+  }
+  return Array.from(weekNumbers).sort((a, b) => a - b)
+}
+
+function calculateVacationImpact(
+  vacation: VacationEvent,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>,
+  existingVacations: VacationEvent[]
+): ComplianceImpact {
+  // Create a modified dayStatus treating vacation days as non-office
+  const vacationDates = new Set<string>()
+
+  // Add dates from this vacation
+  for (const dateStr of getVacationDates(vacation)) {
+    vacationDates.add(dateStr)
+  }
+
+  // Add dates from other existing vacations
+  for (const v of existingVacations) {
+    if (v.id !== vacation.id) {
+      for (const dateStr of getVacationDates(v)) {
+        vacationDates.add(dateStr)
+      }
+    }
+  }
+
+  // Find the maximum week number we need to consider
+  const affectedWeeks = getAffectedWeeks(vacation, startWeekDate)
+  if (affectedWeeks.length === 0) {
+    return 'ok' // Vacation is before tracking period
+  }
+
+  const maxWeek = Math.max(...affectedWeeks, ROLLING_WINDOW_WEEKS)
+
+  // Calculate compliance for affected weeks treating vacation days as non-office
+  let totalCompliantWeeks = 0
+  for (let w = 1; w <= maxWeek; w++) {
+    const weekStart = getWeekStartDate(w, startWeekDate)
+    let officeDays = 0
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart)
+      d.setDate(d.getDate() + i)
+      const dayOfWeek = d.getDay()
+      // Only count weekdays (Mon-Fri)
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        const key = dateKey(d)
+        // If it's a vacation day, don't count it as office
+        if (!vacationDates.has(key) && dayStatus[key] === 'office') {
+          officeDays++
+        }
+      }
+    }
+    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
+      totalCompliantWeeks++
+    }
+  }
+
+  // For a 12-week window, we need 8 compliant weeks
+  // Calculate buffer
+  const buffer = totalCompliantWeeks - REQUIRED_COMPLIANT_WEEKS
+
+  if (buffer < 0) {
+    return 'not-allowed' // Would break compliance
+  } else if (buffer <= 1) {
+    return 'at-risk' // 0-1 weeks buffer (exactly at limit or marginal)
+  } else {
+    return 'ok' // 2+ weeks buffer
+  }
+}
+
+function calculateOpenWeeks(
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>,
+  vacations: VacationEvent[]
+): {
+  availableWeeksOff: number
+  currentCompliantWeeks: number
+} {
+  // Collect all vacation dates
+  const vacationDates = new Set<string>()
+  for (const v of vacations) {
+    for (const dateStr of getVacationDates(v)) {
+      vacationDates.add(dateStr)
+    }
+  }
+
+  // Count compliant weeks in the 12-week window (accounting for existing vacations)
+  let compliantWeeks = 0
+  for (let w = 1; w <= ROLLING_WINDOW_WEEKS; w++) {
+    const weekStart = getWeekStartDate(w, startWeekDate)
+    let officeDays = 0
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart)
+      d.setDate(d.getDate() + i)
+      const dayOfWeek = d.getDay()
+      // Only count weekdays (Mon-Fri)
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        const key = dateKey(d)
+        // If it's a vacation day, don't count it as office
+        if (!vacationDates.has(key) && dayStatus[key] === 'office') {
+          officeDays++
+        }
+      }
+    }
+    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
+      compliantWeeks++
+    }
+  }
+
+  // Calculate buffer: availableWeeksOff = compliantWeeks - REQUIRED_COMPLIANT_WEEKS
+  const availableWeeksOff = Math.max(0, compliantWeeks - REQUIRED_COMPLIANT_WEEKS)
+
+  return {
+    availableWeeksOff,
+    currentCompliantWeeks: compliantWeeks,
+  }
+}
+
+export default function Calendar() {
+  const today = new Date()
+  const [viewYear, setViewYear] = useState(today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  const [dayStatus, setDayStatus] = useState<Record<string, AttendanceStatus>>({})
+  const [startWeekDate, setStartWeekDate] = useState<Date | null>(null)
+  const [isSettingStartWeek, setIsSettingStartWeek] = useState(false)
+  const [vacations, setVacations] = useState<VacationEvent[]>([])
+  const [showVacationForm, setShowVacationForm] = useState(false)
+  const [newVacationName, setNewVacationName] = useState('')
+  const [newVacationStart, setNewVacationStart] = useState('')
+  const [newVacationEnd, setNewVacationEnd] = useState('')
+
+  // Edit vacation state
+  const [editingVacationId, setEditingVacationId] = useState<string | null>(null)
+  const [editVacationName, setEditVacationName] = useState('')
+  const [editVacationStart, setEditVacationStart] = useState('')
+  const [editVacationEnd, setEditVacationEnd] = useState('')
+
+  const daysInMonth = getDaysInMonth(viewYear, viewMonth)
+  const firstDay = getFirstDayOfMonth(viewYear, viewMonth)
+  const monthName = new Date(viewYear, viewMonth).toLocaleString('default', { month: 'long' })
+
+  const prevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11)
+      setViewYear(viewYear - 1)
+    } else {
+      setViewMonth(viewMonth - 1)
+    }
+  }
+
+  const nextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0)
+      setViewYear(viewYear + 1)
+    } else {
+      setViewMonth(viewMonth + 1)
+    }
+  }
+
+  const goToToday = () => {
+    setViewYear(today.getFullYear())
+    setViewMonth(today.getMonth())
+  }
+
+  const handleDayClick = (day: number) => {
+    if (isSettingStartWeek) {
+      setStartWeekDate(new Date(viewYear, viewMonth, day))
+      setIsSettingStartWeek(false)
+      return
+    }
+
+    const key = dateKeyFromParts(viewYear, viewMonth, day)
+    setDayStatus(prev => {
+      const currentStatus = prev[key] || 'not-set'
+      const currentIndex = STATUS_CYCLE.indexOf(currentStatus)
+      const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length]
+      return { ...prev, [key]: nextStatus }
+    })
+  }
+
+  const handleAddVacation = () => {
+    if (!newVacationName.trim() || !newVacationStart || !newVacationEnd) return
+    const newVacation: VacationEvent = {
+      id: crypto.randomUUID(),
+      name: newVacationName.trim(),
+      startDate: newVacationStart,
+      endDate: newVacationEnd,
+    }
+    setVacations(prev => [...prev, newVacation])
+
+    // Auto-mark vacation days as OOF
+    const vacationDates = getVacationDates(newVacation)
+    setDayStatus(prev => {
+      const updated = { ...prev }
+      for (const dateStr of vacationDates) {
+        updated[dateStr] = 'oof'
+      }
+      return updated
+    })
+
+    setNewVacationName('')
+    setNewVacationStart('')
+    setNewVacationEnd('')
+    setShowVacationForm(false)
+  }
+
+  const handleDeleteVacation = (id: string) => {
+    setVacations(prev => prev.filter(v => v.id !== id))
+    // Cancel edit mode if deleting the vacation being edited
+    if (editingVacationId === id) {
+      setEditingVacationId(null)
+    }
+  }
+
+  const handleStartEdit = (vacation: VacationEvent) => {
+    setEditingVacationId(vacation.id)
+    setEditVacationName(vacation.name)
+    setEditVacationStart(vacation.startDate)
+    setEditVacationEnd(vacation.endDate)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingVacationId(null)
+    setEditVacationName('')
+    setEditVacationStart('')
+    setEditVacationEnd('')
+  }
+
+  // Sync end date with start date for vacation forms
+  const handleNewVacationStartChange = (value: string) => {
+    setNewVacationStart(value)
+    if (!newVacationEnd || newVacationEnd < value) {
+      setNewVacationEnd(value)
+    }
+  }
+
+  const handleEditVacationStartChange = (value: string) => {
+    setEditVacationStart(value)
+    if (!editVacationEnd || editVacationEnd < value) {
+      setEditVacationEnd(value)
+    }
+  }
+
+  const handleSaveEdit = () => {
+    if (!editingVacationId || !editVacationName.trim() || !editVacationStart || !editVacationEnd) return
+
+    // Find the old vacation to get its dates
+    const oldVacation = vacations.find(v => v.id === editingVacationId)
+    const oldDates = oldVacation ? getVacationDates(oldVacation) : []
+
+    // Create updated vacation
+    const updatedVacation: VacationEvent = {
+      id: editingVacationId,
+      name: editVacationName.trim(),
+      startDate: editVacationStart,
+      endDate: editVacationEnd,
+    }
+    const newDates = getVacationDates(updatedVacation)
+
+    setVacations(prev =>
+      prev.map(v =>
+        v.id === editingVacationId
+          ? updatedVacation
+          : v
+      )
+    )
+
+    // Update dayStatus: clear old dates, mark new dates as OOF
+    setDayStatus(prev => {
+      const updated = { ...prev }
+      // Clear old vacation dates (set to 'not-set')
+      for (const dateStr of oldDates) {
+        if (!newDates.includes(dateStr)) {
+          updated[dateStr] = 'not-set'
+        }
+      }
+      // Mark new vacation dates as OOF
+      for (const dateStr of newDates) {
+        updated[dateStr] = 'oof'
+      }
+      return updated
+    })
+
+    handleCancelEdit()
+  }
+
+  const formatVacationDateRange = (vacation: VacationEvent): string => {
+    const start = new Date(vacation.startDate + 'T00:00:00')
+    const end = new Date(vacation.endDate + 'T00:00:00')
+    const startStr = start.toLocaleDateString('default', { month: 'short', day: 'numeric' })
+    const endStr = end.toLocaleDateString('default', { month: 'short', day: 'numeric' })
+    return `${startStr}-${endStr}`
+  }
+
+  const getImpactLabel = (impact: ComplianceImpact): string => {
+    switch (impact) {
+      case 'ok': return 'OK'
+      case 'at-risk': return 'At Risk'
+      case 'not-allowed': return 'Not Allowed'
+    }
+  }
+
+  const getImpactDescription = (vacation: VacationEvent, impact: ComplianceImpact): string => {
+    if (!startWeekDate) return ''
+
+    // Calculate buffer for description
+    const vacationDates = new Set<string>()
+    for (const dateStr of getVacationDates(vacation)) {
+      vacationDates.add(dateStr)
+    }
+    for (const v of vacations) {
+      if (v.id !== vacation.id) {
+        for (const dateStr of getVacationDates(v)) {
+          vacationDates.add(dateStr)
+        }
+      }
+    }
+
+    const affectedWeeks = getAffectedWeeks(vacation, startWeekDate)
+    const maxWeek = affectedWeeks.length > 0 ? Math.max(...affectedWeeks, ROLLING_WINDOW_WEEKS) : ROLLING_WINDOW_WEEKS
+
+    let totalCompliantWeeks = 0
+    for (let w = 1; w <= maxWeek; w++) {
+      const weekStart = getWeekStartDate(w, startWeekDate)
+      let officeDays = 0
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(weekStart)
+        d.setDate(d.getDate() + i)
+        const dayOfWeek = d.getDay()
+        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+          const key = dateKey(d)
+          if (!vacationDates.has(key) && dayStatus[key] === 'office') {
+            officeDays++
+          }
+        }
+      }
+      if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
+        totalCompliantWeeks++
+      }
+    }
+
+    const buffer = totalCompliantWeeks - REQUIRED_COMPLIANT_WEEKS
+
+    switch (impact) {
+      case 'ok': return `${buffer} weeks buffer`
+      case 'at-risk': return buffer === 0 ? 'exactly at limit' : '1 week buffer'
+      case 'not-allowed': return `${Math.abs(buffer)} weeks short`
+    }
+  }
+
+  // Build calendar grid with week info
+  const days: (number | null)[] = []
+  for (let i = 0; i < firstDay; i++) {
+    days.push(null)
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    days.push(d)
+  }
+
+  // Group days into weeks
+  const weeks: { weekNum: number | null; days: (number | null)[] }[] = []
+  for (let i = 0; i < days.length; i += 7) {
+    const weekDays = days.slice(i, i + 7)
+    const firstRealDay = weekDays.find(d => d !== null)
+    let weekNum: number | null = null
+    if (firstRealDay) {
+      weekNum = getWeekNumber(new Date(viewYear, viewMonth, firstRealDay), startWeekDate)
+    }
+    weeks.push({ weekNum, days: weekDays })
+  }
+
+  const startWeekDisplay = startWeekDate
+    ? `Week 1 starts: ${startWeekDate.toLocaleDateString('default', { month: 'short', day: 'numeric', year: 'numeric' })}`
+    : 'No start week set'
+
+  // Calculate open weeks for display
+  const openWeeksData = startWeekDate
+    ? calculateOpenWeeks(startWeekDate, dayStatus, vacations)
+    : null
+
+  return (
+    <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {/* Month Navigation */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={prevMonth}
+          className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
+        >
+          <ChevronLeftIcon />
+        </button>
+        <div className="flex items-center gap-3">
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            {monthName} {viewYear}
+          </h2>
+          <button
+            onClick={goToToday}
+            className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+          >
+            Today
+          </button>
+        </div>
+        <button
+          onClick={nextMonth}
+          className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
+        >
+          <ChevronRightIcon />
+        </button>
+      </div>
+
+      {/* Start Week Setting */}
+      <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-gray-600">
+            <CalendarIcon />
+            <span className="font-medium">{startWeekDisplay}</span>
+          </div>
+          <button
+            onClick={() => setIsSettingStartWeek(!isSettingStartWeek)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+              isSettingStartWeek
+                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md'
+                : 'bg-white border border-gray-200 hover:border-indigo-300 hover:shadow-sm'
+            }`}
+          >
+            {isSettingStartWeek ? 'Click a day...' : 'Set Start Week'}
+          </button>
+        </div>
+
+        {/* Open Days Summary Card */}
+        {openWeeksData && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-lg ${
+                  openWeeksData.availableWeeksOff > 0
+                    ? 'bg-gradient-to-br from-emerald-100 to-green-100'
+                    : 'bg-gradient-to-br from-amber-100 to-yellow-100'
+                }`}>
+                  <span className={`text-2xl font-bold ${
+                    openWeeksData.availableWeeksOff > 0 ? 'text-emerald-600' : 'text-amber-600'
+                  }`}>
+                    {openWeeksData.availableWeeksOff}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-700">
+                    {openWeeksData.availableWeeksOff === 1 ? 'week available' : 'weeks available'} for time off
+                  </p>
+                  <p className="text-sm text-gray-500 flex items-center gap-1">
+                    <InfoIcon />
+                    {openWeeksData.currentCompliantWeeks}/{ROLLING_WINDOW_WEEKS} compliant weeks in window
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <div className="grid grid-cols-8 gap-1">
+          {/* Header row with week column */}
+          <div className="p-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Wk</div>
+          {WEEKDAYS.map(day => (
+            <div key={day} className="p-2 text-center text-sm font-semibold text-gray-500">
+              {day}
+            </div>
+          ))}
+
+          {/* Weeks */}
+          {weeks.map((week, weekIndex) => {
+            let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean } | null = null
+            if (week.weekNum !== null && startWeekDate) {
+              compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus)
+            }
+
+            return (
+              <Fragment key={`week-row-${weekIndex}`}>
+                {/* Week number cell */}
+                <div
+                  className={`flex flex-col items-center justify-center text-xs p-1 rounded-lg transition-colors ${
+                    compliance
+                      ? compliance.isCompliant
+                        ? 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'
+                        : 'bg-gradient-to-br from-red-100 to-rose-100 text-red-700'
+                      : 'text-gray-400'
+                  }`}
+                >
+                  {week.weekNum !== null && (
+                    <>
+                      <span className="font-bold">{week.weekNum}</span>
+                      {compliance && (
+                        <span className="text-[10px] opacity-75">
+                          {compliance.compliantWeeks}/{compliance.windowSize}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Day cells */}
+                {week.days.map((day, dayIndex) => (
+                  <div key={`${weekIndex}-${dayIndex}`} className="aspect-square">
+                    {day !== null ? (
+                      <button
+                        onClick={() => handleDayClick(day)}
+                        className={`w-full h-full flex items-center justify-center rounded-lg border text-sm font-medium transition-all duration-200 hover:scale-105 ${
+                          isSettingStartWeek
+                            ? 'border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 hover:shadow-md'
+                            : 'border-gray-200 hover:shadow-sm'
+                        } ${STATUS_STYLES[dayStatus[dateKeyFromParts(viewYear, viewMonth, day)] || 'not-set']}`}
+                      >
+                        {day}
+                      </button>
+                    ) : (
+                      <div className="w-full h-full" />
+                    )}
+                  </div>
+                ))}
+              </Fragment>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-6 justify-center text-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 bg-white border border-gray-200 rounded-lg shadow-sm" />
+          <span className="text-gray-600">Not Set</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 bg-gradient-to-br from-emerald-400 to-green-500 rounded-lg shadow-sm" />
+          <span className="text-gray-600">Office</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg shadow-sm" />
+          <span className="text-gray-600">OOF</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-center gap-2 text-sm text-gray-500 bg-gray-50 rounded-lg px-4 py-2">
+        <InfoIcon />
+        <span>Rule: {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks must have {REQUIRED_DAYS_PER_WEEK}+ office days</span>
+      </div>
+
+      {/* Vacation Planning Section */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            Vacation Planning
+          </h3>
+          <button
+            onClick={() => setShowVacationForm(!showVacationForm)}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+          >
+            + Add Vacation
+          </button>
+        </div>
+
+        {/* Vacation Form */}
+        {showVacationForm && (
+          <div className="mb-4 p-4 border border-gray-200 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50">
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">Name</label>
+                <input
+                  type="text"
+                  value={newVacationName}
+                  onChange={e => setNewVacationName(e.target.value)}
+                  placeholder="e.g., Hawaii"
+                  className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                />
+              </div>
+              <div className="flex gap-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Start</label>
+                  <input
+                    type="date"
+                    value={newVacationStart}
+                    onChange={e => handleNewVacationStartChange(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-600 mb-1">End</label>
+                  <input
+                    type="date"
+                    value={newVacationEnd}
+                    onChange={e => setNewVacationEnd(e.target.value)}
+                    min={newVacationStart}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleAddVacation}
+                disabled={!newVacationName.trim() || !newVacationStart || !newVacationEnd}
+                className="w-full px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
+              >
+                Add Vacation
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Vacation List */}
+        {vacations.length > 0 && (
+          <div className="space-y-3">
+            {vacations.map(vacation => {
+              const impact = startWeekDate
+                ? calculateVacationImpact(vacation, startWeekDate, dayStatus, vacations)
+                : 'ok'
+              const isEditing = editingVacationId === vacation.id
+
+              return (
+                <div
+                  key={vacation.id}
+                  className={`p-4 border rounded-xl transition-all duration-200 ${IMPACT_STYLES[impact]} ${
+                    isEditing ? 'ring-2 ring-indigo-300' : 'hover:shadow-md cursor-pointer'
+                  }`}
+                  onClick={() => !isEditing && handleStartEdit(vacation)}
+                >
+                  {isEditing ? (
+                    // Edit mode UI
+                    <div className="space-y-3" onClick={e => e.stopPropagation()}>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-600 mb-1">Name</label>
+                        <input
+                          type="text"
+                          value={editVacationName}
+                          onChange={e => setEditVacationName(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                        />
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-gray-600 mb-1">Start</label>
+                          <input
+                            type="date"
+                            value={editVacationStart}
+                            onChange={e => handleEditVacationStartChange(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="block text-sm font-medium text-gray-600 mb-1">End</label>
+                          <input
+                            type="date"
+                            value={editVacationEnd}
+                            onChange={e => setEditVacationEnd(e.target.value)}
+                            min={editVacationStart}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSaveEdit}
+                          disabled={!editVacationName.trim() || !editVacationStart || !editVacationEnd}
+                          className="flex-1 px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={handleCancelEdit}
+                          className="flex-1 px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all duration-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Display mode UI
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold text-gray-800">{vacation.name}</span>
+                          <span className="text-gray-500 ml-2">({formatVacationDateRange(vacation)})</span>
+                        </div>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleStartEdit(vacation)}
+                            className="p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+                            title="Edit vacation"
+                          >
+                            <PencilIcon />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteVacation(vacation.id)}
+                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200"
+                            title="Delete vacation"
+                          >
+                            <TrashIcon />
+                          </button>
+                        </div>
+                      </div>
+                      <div className={`text-sm mt-2 font-medium ${
+                        impact === 'ok' ? 'text-emerald-600' :
+                        impact === 'at-risk' ? 'text-amber-600' :
+                        'text-red-600'
+                      }`}>
+                        {getImpactLabel(impact)} - {getImpactDescription(vacation, impact)}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {vacations.length === 0 && !showVacationForm && (
+          <div className="text-center py-8">
+            <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl mb-3">
+              <CalendarIcon />
+            </div>
+            <p className="text-gray-500">
+              No vacations planned. Click &quot;+ Add Vacation&quot; to plan time off.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
