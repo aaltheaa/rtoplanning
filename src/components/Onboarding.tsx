@@ -41,6 +41,16 @@ export default function Onboarding() {
     }
   }, [])
 
+  useEffect(() => {
+    const handleShowOnboarding = () => {
+      localStorage.removeItem('rto-onboarding-complete')
+      setCurrentStep(0)
+      setIsVisible(true)
+    }
+    window.addEventListener('show-onboarding', handleShowOnboarding)
+    return () => window.removeEventListener('show-onboarding', handleShowOnboarding)
+  }, [])
+
   const handleNext = () => {
     if (currentStep < TIPS.length - 1) {
       setCurrentStep(currentStep + 1)

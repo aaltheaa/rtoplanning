@@ -186,17 +186,11 @@ function generateAutoVacations(
     }
   }
 
-  // Find all OOF days not covered by manual vacations (weekdays only)
+  // Find all OOF days not covered by manual vacations
   const oofDates: string[] = []
   for (const [dateStr, status] of Object.entries(dayStatus)) {
     if (status === 'oof' && !manualVacationDates.has(dateStr)) {
-      // Only include weekdays (Mon-Fri)
-      const [year, month, day] = dateStr.split('-').map(Number)
-      const date = new Date(year, month - 1, day)
-      const dayOfWeek = date.getDay()
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        oofDates.push(dateStr)
-      }
+      oofDates.push(dateStr)
     }
   }
 
@@ -727,6 +721,16 @@ export default function Calendar() {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {/* App Header */}
+      <div className="text-center mb-2">
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+          RTO Planning Calculator
+        </h1>
+        <p className="text-sm text-gray-500 mt-1 max-w-xs mx-auto">
+          Plan your days at and outside the office while meeting RTO requirements
+        </p>
+      </div>
+
       {/* Month Navigation */}
       <div className="flex items-center justify-between">
         <button
@@ -736,7 +740,7 @@ export default function Calendar() {
           <ChevronLeftIcon />
         </button>
         <div className="flex items-center gap-3">
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+          <h2 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
             {monthName} {viewYear}
           </h2>
           <button
@@ -755,11 +759,11 @@ export default function Calendar() {
       </div>
 
       {/* Start Week Setting */}
-      <div className="p-4 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200 shadow-sm">
+      <div className="p-3 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-gray-600">
             <CalendarIcon />
-            <span className="font-medium">{startWeekDisplay}</span>
+            <span className="text-sm font-medium">{startWeekDisplay}</span>
           </div>
           <button
             onClick={() => setIsSettingStartWeek(!isSettingStartWeek)}
@@ -775,25 +779,25 @@ export default function Calendar() {
 
         {/* Open Days Summary Card */}
         {openWeeksData && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
+          <div className="mt-3 pt-3 border-t border-gray-200">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-3 rounded-lg ${
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-lg ${
                   openWeeksData.availableWeeksOff > 0
                     ? 'bg-gradient-to-br from-emerald-100 to-green-100'
                     : 'bg-gradient-to-br from-amber-100 to-yellow-100'
                 }`}>
-                  <span className={`text-2xl font-bold ${
+                  <span className={`text-lg font-bold ${
                     openWeeksData.availableWeeksOff > 0 ? 'text-emerald-600' : 'text-amber-600'
                   }`}>
                     {openWeeksData.availableWeeksOff}
                   </span>
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-700">
+                  <p className="text-sm font-semibold text-gray-700">
                     {openWeeksData.availableWeeksOff === 1 ? 'week available' : 'weeks available'} for time off
                   </p>
-                  <p className="text-sm text-gray-500 flex items-center gap-1">
+                  <p className="text-xs text-gray-500 flex items-center gap-1">
                     <InfoIcon />
                     {openWeeksData.currentCompliantWeeks}/{ROLLING_WINDOW_WEEKS} compliant weeks in window
                   </p>
@@ -1092,7 +1096,7 @@ export default function Calendar() {
       </div>
 
       {/* Footer */}
-      <div className="pt-8 pb-4 text-center">
+      <div className="pt-8 pb-4 text-center flex items-center justify-center gap-3">
         <a
           href="https://github.com/aaltheaa"
           target="_blank"
@@ -1101,6 +1105,13 @@ export default function Calendar() {
         >
           made with vibes ❤️
         </a>
+        <span className="text-gray-300">•</span>
+        <button
+          onClick={() => window.dispatchEvent(new Event('show-onboarding'))}
+          className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          ?
+        </button>
       </div>
     </div>
   )
