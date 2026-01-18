@@ -59,6 +59,12 @@ const InfoIcon = () => (
   </svg>
 )
 
+const CloseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+  </svg>
+)
+
 const IMPACT_STYLES: Record<ComplianceImpact, string> = {
   'ok': 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 shadow-sm',
   'at-risk': 'bg-gradient-to-r from-amber-50 to-yellow-50 border-amber-200 shadow-sm',
@@ -100,8 +106,11 @@ function getWeekNumber(date: Date, startWeekDate: Date | null): number | null {
   const startOfThisWeek = getStartOfWeek(date)
   const startOfRefWeek = getStartOfWeek(startWeekDate)
   if (startOfThisWeek < startOfRefWeek) return null
-  const diffTime = startOfThisWeek.getTime() - startOfRefWeek.getTime()
-  const diffWeeks = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000))
+  // Use UTC to avoid DST issues when calculating week differences
+  const utcThis = Date.UTC(startOfThisWeek.getFullYear(), startOfThisWeek.getMonth(), startOfThisWeek.getDate())
+  const utcRef = Date.UTC(startOfRefWeek.getFullYear(), startOfRefWeek.getMonth(), startOfRefWeek.getDate())
+  const diffDays = Math.round((utcThis - utcRef) / (24 * 60 * 60 * 1000))
+  const diffWeeks = Math.floor(diffDays / 7)
   return diffWeeks + 1
 }
 
@@ -157,6 +166,27 @@ function getRollingCompliance(
     windowSize,
     isCompliant: compliantWeeks >= requiredForWindow,
   }
+}
+
+type WeekRiskStatus = 'safe' | 'at-risk' | 'not-compliant'
+
+function getWeekRiskStatus(
+  weekNum: number,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>
+): WeekRiskStatus {
+  const compliance = getRollingCompliance(weekNum, startWeekDate, dayStatus)
+
+  // For full 12-week windows, check buffer
+  if (compliance.windowSize >= ROLLING_WINDOW_WEEKS) {
+    const buffer = compliance.compliantWeeks - REQUIRED_COMPLIANT_WEEKS
+    if (buffer < 0) return 'not-compliant'
+    if (buffer <= 1) return 'at-risk' // 0-1 buffer (8-9 compliant weeks)
+    return 'safe' // 2+ buffer (10+ compliant weeks)
+  }
+
+  // For smaller windows, use proportional requirement
+  return compliance.isCompliant ? 'safe' : 'not-compliant'
 }
 
 function getVacationDates(vacation: VacationEvent): string[] {
@@ -386,6 +416,9 @@ export default function Calendar() {
 
   // Edit vacation state
   const [editingVacationId, setEditingVacationId] = useState<string | null>(null)
+
+  // Selected week for compliance detail view
+  const [selectedWeek, setSelectedWeek] = useState<number | null>(null)
   const [editVacationName, setEditVacationName] = useState('')
   const [editVacationStart, setEditVacationStart] = useState('')
   const [editVacationEnd, setEditVacationEnd] = useState('')
@@ -777,33 +810,163 @@ export default function Calendar() {
           </button>
         </div>
 
-        {/* Open Days Summary Card */}
-        {openWeeksData && (
+        {/* Open Days Summary Card OR Selected Week Detail */}
+        {startWeekDate && (
           <div className="mt-3 pt-3 border-t border-gray-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`p-2 rounded-lg ${
-                  openWeeksData.availableWeeksOff > 0
-                    ? 'bg-gradient-to-br from-emerald-100 to-green-100'
-                    : 'bg-gradient-to-br from-amber-100 to-yellow-100'
-                }`}>
-                  <span className={`text-lg font-bold ${
-                    openWeeksData.availableWeeksOff > 0 ? 'text-emerald-600' : 'text-amber-600'
-                  }`}>
-                    {openWeeksData.availableWeeksOff}
-                  </span>
+            {selectedWeek !== null ? (
+              // Selected Week Detail Card
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-bold text-gray-800">Week {selectedWeek} Status</h4>
+                  <button
+                    onClick={() => setSelectedWeek(null)}
+                    className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    <CloseIcon />
+                  </button>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-700">
-                    {openWeeksData.availableWeeksOff === 1 ? 'week available' : 'weeks available'} for time off
-                  </p>
-                  <p className="text-xs text-gray-500 flex items-center gap-1">
-                    <InfoIcon />
-                    {openWeeksData.currentCompliantWeeks}/{ROLLING_WINDOW_WEEKS} compliant weeks in window
-                  </p>
-                </div>
+                {(() => {
+                  const weekStart = getWeekStartDate(selectedWeek, startWeekDate)
+                  const officeDaysThisWeek = getOfficeDaysInWeek(weekStart, dayStatus)
+                  const compliance = getRollingCompliance(selectedWeek, startWeekDate, dayStatus)
+                  const riskStatus = getWeekRiskStatus(selectedWeek, startWeekDate, dayStatus)
+                  const officeDaysNeeded = Math.max(0, REQUIRED_DAYS_PER_WEEK - officeDaysThisWeek)
+                  const isWeekCompliant = officeDaysThisWeek >= REQUIRED_DAYS_PER_WEEK
+
+                  const requiredForWindow = selectedWeek >= ROLLING_WINDOW_WEEKS
+                    ? REQUIRED_COMPLIANT_WEEKS
+                    : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * compliance.windowSize)
+                  const weeksNeeded = Math.max(0, requiredForWindow - compliance.compliantWeeks)
+                  const windowStartWeek = Math.max(1, selectedWeek - ROLLING_WINDOW_WEEKS + 1)
+
+                  return (
+                    <div className="space-y-2">
+                      {/* This week's office days */}
+                      <div className={`p-2 rounded-lg ${
+                        isWeekCompliant
+                          ? 'bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200'
+                          : 'bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <span className={isWeekCompliant ? 'text-emerald-600' : 'text-amber-600'}>
+                            {isWeekCompliant ? '✓' : '⚠️'}
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">
+                              This week: {officeDaysThisWeek} office day{officeDaysThisWeek !== 1 ? 's' : ''}
+                              {!isWeekCompliant && (
+                                <span className="text-amber-600 ml-1">
+                                  (needs {officeDaysNeeded} more)
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {(() => {
+                                const weekEnd = new Date(weekStart)
+                                weekEnd.setDate(weekEnd.getDate() + 6)
+                                return `${weekStart.toLocaleDateString('default', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('default', { month: 'short', day: 'numeric' })}`
+                              })()}
+                            </p>
+                            <div className="flex gap-1 mt-1">
+                              {[1, 2, 3, 4, 5].map(i => {
+                                const d = new Date(weekStart)
+                                d.setDate(d.getDate() + i)
+                                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+                                const status = dayStatus[key] || 'not-set'
+                                const colors: Record<string, string> = {
+                                  'office': 'bg-blue-200',
+                                  'oof': 'bg-purple-200',
+                                  'not-set': 'bg-gray-100'
+                                }
+                                return (
+                                  <span key={i} className={`text-[9px] px-1 rounded ${colors[status]}`} title={`${key}: ${status}`}>
+                                    {d.getDate()}
+                                  </span>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Rolling compliance */}
+                      <div className={`p-2 rounded-lg ${
+                        riskStatus === 'safe'
+                          ? 'bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200'
+                          : riskStatus === 'at-risk'
+                          ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200'
+                          : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200'
+                      }`}>
+                        <p className="text-xs text-gray-600">
+                          Weeks {windowStartWeek}-{selectedWeek}: {compliance.compliantWeeks}/{compliance.windowSize} compliant
+                        </p>
+                        {riskStatus === 'not-compliant' && weeksNeeded > 0 && (
+                          <p className="text-xs text-red-600 mt-1">
+                            ❌ Need {weeksNeeded} more compliant week{weeksNeeded !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                        {riskStatus === 'at-risk' && (
+                          <p className="text-xs text-amber-600 mt-1">
+                            ⚠️ At risk - {compliance.compliantWeeks - requiredForWindow} week buffer
+                          </p>
+                        )}
+                        {riskStatus === 'safe' && (
+                          <p className="text-xs text-emerald-600 mt-1">
+                            ✓ {compliance.compliantWeeks - requiredForWindow} week{compliance.compliantWeeks - requiredForWindow !== 1 ? 's' : ''} buffer
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
-            </div>
+            ) : startWeekDate ? (
+              // Default Summary with At-Risk Weeks
+              (() => {
+                // Calculate at-risk weeks from visible calendar weeks (>= week 13 only)
+                const atRiskWeeks = weeks
+                  .filter(week => {
+                    if (week.weekNum === null || week.weekNum < 13) return false
+                    const riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
+                    return riskStatus === 'at-risk' || riskStatus === 'not-compliant'
+                  })
+                  .map(week => week.weekNum as number)
+                  .filter((weekNum, index, arr) => arr.indexOf(weekNum) === index) // Remove duplicates
+
+                return (
+                  <>
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      <span>💡</span>
+                      Click on a week number to check its compliance status
+                    </p>
+                    {atRiskWeeks.length > 0 ? (
+                      <div className="mt-2">
+                        <p className="text-xs text-amber-600 flex items-center gap-1 mb-1">
+                          <span>⚠️</span>
+                          At-risk weeks:
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {atRiskWeeks.map(weekNum => (
+                            <button
+                              key={weekNum}
+                              onClick={() => setSelectedWeek(weekNum)}
+                              className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded hover:bg-amber-200 transition-colors"
+                            >
+                              {weekNum}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
+                        <span>✓</span>
+                        All visible weeks are compliant
+                      </p>
+                    )}
+                  </>
+                )
+              })()
+            ) : null}
           </div>
         )}
       </div>
@@ -826,20 +989,34 @@ export default function Calendar() {
           {/* Weeks */}
           {weeks.map((week, weekIndex) => {
             let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean } | null = null
+            let riskStatus: WeekRiskStatus | null = null
             if (week.weekNum !== null && startWeekDate) {
               compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus)
+              riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
+            }
+
+            const getWeekCellStyle = () => {
+              if (!riskStatus) return 'text-gray-400'
+              switch (riskStatus) {
+                case 'safe':
+                  return 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700 hover:from-emerald-200 hover:to-green-200'
+                case 'at-risk':
+                  return 'bg-gradient-to-br from-amber-100 to-yellow-100 text-amber-700 hover:from-amber-200 hover:to-yellow-200'
+                case 'not-compliant':
+                  return 'bg-gradient-to-br from-red-100 to-rose-100 text-red-700 hover:from-red-200 hover:to-rose-200'
+              }
             }
 
             return (
               <Fragment key={`week-row-${weekIndex}`}>
-                {/* Week number cell */}
-                <div
-                  className={`flex flex-col items-center justify-center text-xs p-1 rounded-lg transition-colors ${
-                    compliance
-                      ? compliance.isCompliant
-                        ? 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'
-                        : 'bg-gradient-to-br from-red-100 to-rose-100 text-red-700'
-                      : 'text-gray-400'
+                {/* Week number cell - clickable */}
+                <button
+                  onClick={() => week.weekNum !== null && setSelectedWeek(selectedWeek === week.weekNum ? null : week.weekNum)}
+                  disabled={week.weekNum === null}
+                  className={`flex flex-col items-center justify-center text-xs p-1 rounded-lg transition-all duration-200 ${
+                    getWeekCellStyle()
+                  } ${week.weekNum !== null ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : ''} ${
+                    selectedWeek === week.weekNum ? 'ring-2 ring-indigo-400 ring-offset-1' : ''
                   }`}
                 >
                   {week.weekNum !== null && (
@@ -852,7 +1029,7 @@ export default function Calendar() {
                       )}
                     </>
                   )}
-                </div>
+                </button>
 
                 {/* Day cells */}
                 {week.days.map((day, dayIndex) => (
