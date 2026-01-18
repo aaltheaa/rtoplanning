@@ -25,7 +25,7 @@ const TIPS = [
   },
   {
     title: 'Stay Compliant',
-    description: 'The app checks if 8 out of your last 12 weeks have 3+ office days. Green weeks are compliant, red weeks need more office time.',
+    description: 'For each week, you need 3+ office days in 8 of your last 12 weeks. Click any week number to check its status and get a summary on any at-risk weeks.',
     icon: '✅',
   },
 ]
