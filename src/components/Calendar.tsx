@@ -930,8 +930,11 @@ export default function Calendar() {
                     const riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
                     return riskStatus === 'at-risk' || riskStatus === 'not-compliant'
                   })
-                  .map(week => week.weekNum as number)
-                  .filter((weekNum, index, arr) => arr.indexOf(weekNum) === index) // Remove duplicates
+                  .map(week => ({
+                    weekNum: week.weekNum as number,
+                    status: getWeekRiskStatus(week.weekNum!, startWeekDate, dayStatus)
+                  }))
+                  .filter((item, index, arr) => arr.findIndex(x => x.weekNum === item.weekNum) === index) // Remove duplicates
 
                 return (
                   <>
@@ -941,16 +944,19 @@ export default function Calendar() {
                     </p>
                     {atRiskWeeks.length > 0 ? (
                       <div className="mt-2">
-                        <p className="text-xs text-amber-600 flex items-center gap-1 mb-1">
-                          <span>⚠️</span>
-                          At-risk weeks:
+                        <p className="text-xs text-gray-600 flex items-center gap-1 mb-1">
+                          Weeks to review:
                         </p>
                         <div className="flex flex-wrap gap-1">
-                          {atRiskWeeks.map(weekNum => (
+                          {atRiskWeeks.map(({ weekNum, status }) => (
                             <button
                               key={weekNum}
                               onClick={() => setSelectedWeek(weekNum)}
-                              className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded hover:bg-amber-200 transition-colors"
+                              className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                                status === 'not-compliant'
+                                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                  : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                              }`}
                             >
                               {weekNum}
                             </button>
