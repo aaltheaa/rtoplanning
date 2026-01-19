@@ -881,67 +881,270 @@ export default function Calendar() {
     : null
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6">
       {/* App Header */}
       <div className="text-center mb-2">
         <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
           RTO Planning Calculator
         </h1>
-        <p className="text-sm text-gray-500 mt-1 max-w-xs mx-auto">
+        <p className="text-sm text-gray-500 mt-1 max-w-md mx-auto">
           Plan your days at and outside the office while meeting RTO requirements
         </p>
       </div>
 
-      {/* Month Navigation */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={prevMonth}
-          className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
-        >
-          <ChevronLeftIcon />
-        </button>
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            {monthName} {viewYear}
-          </h2>
-          <button
-            onClick={goToToday}
-            className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200"
-          >
-            Today
-          </button>
-        </div>
-        <button
-          onClick={nextMonth}
-          className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
-        >
-          <ChevronRightIcon />
-        </button>
-      </div>
-
-      {/* Start Week Setting */}
-      <div className="p-3 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-gray-600">
-            <CalendarIcon />
-            <span className="text-sm font-medium">{startWeekDisplay}</span>
+      {/* Two-column layout */}
+      <div className="flex flex-col lg:flex-row gap-6 items-stretch justify-center">
+        {/* Left Column - Compliance hint and Vacation planning */}
+        <div className="w-full lg:w-80 flex flex-col space-y-4 order-last lg:order-first">
+          {/* Compliance Rule Hint Card */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+            <div className="flex items-center gap-2 text-gray-700 mb-2">
+              <InfoIcon />
+              <span className="font-semibold">Compliance Rule</span>
+            </div>
+            <p className="text-sm text-gray-600">
+              {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks must have {REQUIRED_DAYS_PER_WEEK}+ office days in any rolling 12-week window.
+            </p>
           </div>
-          <button
-            onClick={() => setIsSettingStartWeek(!isSettingStartWeek)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-              isSettingStartWeek
-                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md'
-                : 'bg-white border border-gray-200 hover:border-indigo-300 hover:shadow-sm'
-            }`}
-          >
-            {isSettingStartWeek ? 'Click a day...' : 'Set Start Week'}
-          </button>
+
+          {/* Vacation Planning Section - grows to fill, scrollable */}
+          <div className="flex-1 flex flex-col min-h-0 bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                Vacation Planning
+              </h3>
+              <button
+                onClick={() => setShowVacationForm(!showVacationForm)}
+                className="px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+              >
+                + Add
+              </button>
+            </div>
+
+            {/* Vacation Form */}
+            {showVacationForm && (
+              <div className="mb-4 p-3 border border-gray-200 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={newVacationName}
+                      onChange={e => setNewVacationName(e.target.value)}
+                      placeholder="e.g., Hawaii"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">Start</label>
+                    <input
+                      type="date"
+                      value={newVacationStart}
+                      onChange={e => handleNewVacationStartChange(e.target.value)}
+                      className="w-full px-2 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">End</label>
+                    <input
+                      type="date"
+                      value={newVacationEnd}
+                      onChange={e => setNewVacationEnd(e.target.value)}
+                      min={newVacationStart}
+                      className="w-full px-2 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddVacation}
+                    disabled={!newVacationName.trim() || !newVacationStart || !newVacationEnd}
+                    className="w-full px-3 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
+                  >
+                    Add Vacation
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Scrollable Vacation List */}
+            <div className="flex-1 overflow-y-auto space-y-3 max-h-64 lg:max-h-80 pr-2">
+              {allVacations.length > 0 ? (
+                allVacations.map(vacation => {
+                  const impact = startWeekDate
+                    ? calculateVacationImpact(vacation, startWeekDate, dayStatus, allVacations)
+                    : 'ok'
+                  const isEditing = editingVacationId === vacation.id
+                  const isAuto = vacation.isAutoGenerated
+
+                  return (
+                    <div
+                      key={vacation.id}
+                      className={`p-3 border rounded-xl transition-all duration-200 ${IMPACT_STYLES[impact]} ${
+                        isEditing ? 'ring-2 ring-indigo-300' : isAuto ? '' : 'hover:shadow-md cursor-pointer'
+                      }`}
+                      onClick={() => !isEditing && !isAuto && handleStartEdit(vacation)}
+                    >
+                      {isEditing ? (
+                        // Edit mode UI
+                        <div className="space-y-2" onClick={e => e.stopPropagation()}>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                            <input
+                              type="text"
+                              value={editVacationName}
+                              onChange={e => setEditVacationName(e.target.value)}
+                              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Start</label>
+                              <input
+                                type="date"
+                                value={editVacationStart}
+                                onChange={e => handleEditVacationStartChange(e.target.value)}
+                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-xs font-medium text-gray-600 mb-1">End</label>
+                              <input
+                                type="date"
+                                value={editVacationEnd}
+                                onChange={e => setEditVacationEnd(e.target.value)}
+                                min={editVacationStart}
+                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={handleSaveEdit}
+                              disabled={!editVacationName.trim() || !editVacationStart || !editVacationEnd}
+                              className="flex-1 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="flex-1 px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all duration-200"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        // Display mode UI
+                        <>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="font-semibold text-gray-800 text-sm">{vacation.name}</span>
+                                {isAuto && (
+                                  <span className="text-[10px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded-full whitespace-nowrap">
+                                    calendar
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-gray-500">{formatVacationDateRange(vacation)}</span>
+                            </div>
+                            {!isAuto && (
+                              <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleStartEdit(vacation)}
+                                  className="p-1.5 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+                                  title="Edit vacation"
+                                >
+                                  <PencilIcon />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteVacation(vacation.id)}
+                                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200"
+                                  title="Delete vacation"
+                                >
+                                  <TrashIcon />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          <div className={`text-xs mt-1.5 font-medium ${
+                            impact === 'ok' ? 'text-emerald-600' :
+                            impact === 'at-risk' ? 'text-amber-600' :
+                            'text-red-600'
+                          }`}>
+                            {getImpactLabel(impact)} - {getImpactDescription(vacation, impact)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })
+              ) : !showVacationForm ? (
+                <div className="text-center py-6">
+                  <div className="inline-flex items-center justify-center w-10 h-10 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl mb-2">
+                    <CalendarIcon />
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    No vacations planned yet
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
 
-        {/* Open Days Summary Card OR Selected Week Detail */}
-        {startWeekDate && (
-          <div className="mt-3 pt-3 border-t border-gray-200">
-            {selectedWeek !== null ? (
+        {/* Right Column - Calendar */}
+        <div className="flex-1 max-w-lg bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+          {/* Month Navigation */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={prevMonth}
+              className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
+            >
+              <ChevronLeftIcon />
+            </button>
+            <div className="flex items-center gap-3">
+              <h2 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                {monthName} {viewYear}
+              </h2>
+              <button
+                onClick={goToToday}
+                className="px-3 py-1 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+              >
+                Today
+              </button>
+            </div>
+            <button
+              onClick={nextMonth}
+              className="p-3 hover:bg-gray-100 rounded-xl transition-all duration-200 hover:scale-105 text-gray-600"
+            >
+              <ChevronRightIcon />
+            </button>
+          </div>
+
+          {/* Start Week Setting */}
+          <div className="p-3 bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl border border-gray-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-gray-600">
+                <CalendarIcon />
+                <span className="text-sm font-medium">{startWeekDisplay}</span>
+              </div>
+              <button
+                onClick={() => setIsSettingStartWeek(!isSettingStartWeek)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  isSettingStartWeek
+                    ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md'
+                    : 'bg-white border border-gray-200 hover:border-indigo-300 hover:shadow-sm'
+                }`}
+              >
+                {isSettingStartWeek ? 'Click a day...' : 'Set Start Week'}
+              </button>
+            </div>
+
+            {/* Open Days Summary Card OR Selected Week Detail */}
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              {startWeekDate ? (
+                <>
+                  {selectedWeek !== null ? (
               // Selected Week Detail Card
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -1064,6 +1267,14 @@ export default function Calendar() {
                   }))
                   .filter((item, index, arr) => arr.findIndex(x => x.weekNum === item.weekNum) === index) // Remove duplicates
 
+                // Check if any visible weeks are >= 13
+                const hasWeeksAfter12 = weeks.some(week => week.weekNum !== null && week.weekNum >= 13)
+
+                // Calculate first 12 weeks compliance
+                const first12Compliance = getRollingCompliance(12, startWeekDate, dayStatus)
+                const isFirst12Compliant = first12Compliance.compliantWeeks >= REQUIRED_COMPLIANT_WEEKS
+                const weeksNeeded = REQUIRED_COMPLIANT_WEEKS - first12Compliance.compliantWeeks
+
                 return (
                   <>
                     {/* Save & Copy Link */}
@@ -1106,320 +1317,151 @@ export default function Calendar() {
                           ))}
                         </div>
                       </div>
-                    ) : (
+                    ) : hasWeeksAfter12 ? (
                       <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
                         <span>✓</span>
                         All visible weeks are compliant
+                      </p>
+                    ) : isFirst12Compliant ? (
+                      <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
+                        <span>✓</span>
+                        For the first 12 weeks, {first12Compliance.compliantWeeks}/12 weeks are compliant
+                      </p>
+                    ) : (
+                      <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                        <span>✗</span>
+                        For the first 12 weeks, {first12Compliance.compliantWeeks}/12 weeks are compliant (need {weeksNeeded} more)
                       </p>
                     )}
                   </>
                 )
               })()
-            ) : null}
-          </div>
-        )}
-      </div>
-
-      {/* Calendar Grid */}
-      <div
-        ref={calendarRef}
-        className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 select-none"
-        onTouchMove={handleTouchMove}
-      >
-        <div className="grid grid-cols-8 gap-1">
-          {/* Header row with week column */}
-          <div className="p-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Wk</div>
-          {WEEKDAYS.map(day => (
-            <div key={day} className="p-2 text-center text-sm font-semibold text-gray-500">
-              {day}
+                  ) : null}
+                </>
+              ) : (
+                <div className="text-center py-4">
+                  <p className="text-xs text-gray-500 flex items-center justify-center gap-1">
+                    <span>💡</span>
+                    Set a start week to track compliance status
+                  </p>
+                </div>
+              )}
             </div>
-          ))}
-
-          {/* Weeks */}
-          {weeks.map((week, weekIndex) => {
-            let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean } | null = null
-            let riskStatus: WeekRiskStatus | null = null
-            if (week.weekNum !== null && startWeekDate) {
-              compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus)
-              riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
-            }
-
-            const getWeekCellStyle = () => {
-              if (!riskStatus) return 'text-gray-400'
-              switch (riskStatus) {
-                case 'safe':
-                  return 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700 hover:from-emerald-200 hover:to-green-200'
-                case 'at-risk':
-                  return 'bg-gradient-to-br from-amber-100 to-yellow-100 text-amber-700 hover:from-amber-200 hover:to-yellow-200'
-                case 'not-compliant':
-                  return 'bg-gradient-to-br from-red-100 to-rose-100 text-red-700 hover:from-red-200 hover:to-rose-200'
-              }
-            }
-
-            return (
-              <Fragment key={`week-row-${weekIndex}`}>
-                {/* Week number cell - clickable */}
-                <button
-                  onClick={() => week.weekNum !== null && setSelectedWeek(selectedWeek === week.weekNum ? null : week.weekNum)}
-                  disabled={week.weekNum === null}
-                  className={`flex flex-col items-center justify-center text-xs p-1 rounded-lg transition-all duration-200 ${
-                    getWeekCellStyle()
-                  } ${week.weekNum !== null ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : ''} ${
-                    selectedWeek === week.weekNum ? 'ring-2 ring-indigo-400 ring-offset-1' : ''
-                  }`}
-                >
-                  {week.weekNum !== null && (
-                    <>
-                      <span className="font-bold">{week.weekNum}</span>
-                      {compliance && (
-                        <span className="text-[10px] opacity-75">
-                          {compliance.compliantWeeks}/{compliance.windowSize}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-
-                {/* Day cells */}
-                {week.days.map((day, dayIndex) => (
-                  <div key={`${weekIndex}-${dayIndex}`} className="aspect-square">
-                    {day !== null ? (
-                      <button
-                        data-day={day}
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          handleDragStart(day)
-                        }}
-                        onMouseEnter={() => handleDragMove(day)}
-                        onTouchStart={(e) => {
-                          e.preventDefault()
-                          handleDragStart(day)
-                        }}
-                        className={`w-full h-full flex items-center justify-center rounded-lg border text-sm font-medium transition-all duration-200 hover:scale-105 touch-none ${
-                          isSettingStartWeek
-                            ? 'border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 hover:shadow-md'
-                            : 'border-gray-200 hover:shadow-sm'
-                        } ${STATUS_STYLES[dayStatus[dateKeyFromParts(viewYear, viewMonth, day)] || 'not-set']}`}
-                      >
-                        {day}
-                      </button>
-                    ) : (
-                      <div className="w-full h-full" />
-                    )}
-                  </div>
-                ))}
-              </Fragment>
-            )
-          })}
-        </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap gap-6 justify-center text-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 bg-white border border-gray-200 rounded-lg shadow-sm" />
-          <span className="text-gray-600">Not Set</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 bg-gradient-to-br from-emerald-400 to-green-500 rounded-lg shadow-sm" />
-          <span className="text-gray-600">Office</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-5 h-5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg shadow-sm" />
-          <span className="text-gray-600">OOF</span>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-center gap-2 text-sm text-gray-500 bg-gray-50 rounded-lg px-4 py-2">
-        <InfoIcon />
-        <span>Rule: {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks must have {REQUIRED_DAYS_PER_WEEK}+ office days</span>
-      </div>
-
-      {/* Vacation Planning Section */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            Vacation Planning
-          </h3>
-          <button
-            onClick={() => setShowVacationForm(!showVacationForm)}
-            className="px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 hover:scale-105"
+          {/* Calendar Grid */}
+          <div
+            ref={calendarRef}
+            className="select-none max-w-md mx-auto"
+            onTouchMove={handleTouchMove}
           >
-            + Add Vacation
-          </button>
-        </div>
-
-        {/* Vacation Form */}
-        {showVacationForm && (
-          <div className="mb-4 p-4 border border-gray-200 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={newVacationName}
-                  onChange={e => setNewVacationName(e.target.value)}
-                  placeholder="e.g., Hawaii"
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
-                />
-              </div>
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Start</label>
-                  <input
-                    type="date"
-                    value={newVacationStart}
-                    onChange={e => handleNewVacationStartChange(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
-                  />
+            <div className="grid grid-cols-8 gap-1">
+              {/* Header row with week column */}
+              <div className="p-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Wk</div>
+              {WEEKDAYS.map(day => (
+                <div key={day} className="p-2 text-center text-sm font-semibold text-gray-500">
+                  {day}
                 </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-600 mb-1">End</label>
-                  <input
-                    type="date"
-                    value={newVacationEnd}
-                    onChange={e => setNewVacationEnd(e.target.value)}
-                    min={newVacationStart}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={handleAddVacation}
-                disabled={!newVacationName.trim() || !newVacationStart || !newVacationEnd}
-                className="w-full px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
-              >
-                Add Vacation
-              </button>
-            </div>
-          </div>
-        )}
+              ))}
 
-        {/* Vacation List */}
-        {allVacations.length > 0 && (
-          <div className="space-y-3">
-            {allVacations.map(vacation => {
-              const impact = startWeekDate
-                ? calculateVacationImpact(vacation, startWeekDate, dayStatus, allVacations)
-                : 'ok'
-              const isEditing = editingVacationId === vacation.id
-              const isAuto = vacation.isAutoGenerated
+              {/* Weeks */}
+              {weeks.map((week, weekIndex) => {
+                let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean } | null = null
+                let riskStatus: WeekRiskStatus | null = null
+                if (week.weekNum !== null && startWeekDate) {
+                  compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus)
+                  riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
+                }
 
-              return (
-                <div
-                  key={vacation.id}
-                  className={`p-4 border rounded-xl transition-all duration-200 ${IMPACT_STYLES[impact]} ${
-                    isEditing ? 'ring-2 ring-indigo-300' : isAuto ? '' : 'hover:shadow-md cursor-pointer'
-                  }`}
-                  onClick={() => !isEditing && !isAuto && handleStartEdit(vacation)}
-                >
-                  {isEditing ? (
-                    // Edit mode UI
-                    <div className="space-y-3" onClick={e => e.stopPropagation()}>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-600 mb-1">Name</label>
-                        <input
-                          type="text"
-                          value={editVacationName}
-                          onChange={e => setEditVacationName(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
-                        />
-                      </div>
-                      <div className="flex gap-3">
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-600 mb-1">Start</label>
-                          <input
-                            type="date"
-                            value={editVacationStart}
-                            onChange={e => handleEditVacationStartChange(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-600 mb-1">End</label>
-                          <input
-                            type="date"
-                            value={editVacationEnd}
-                            onChange={e => setEditVacationEnd(e.target.value)}
-                            min={editVacationStart}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none transition-all bg-white"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleSaveEdit}
-                          disabled={!editVacationName.trim() || !editVacationStart || !editVacationEnd}
-                          className="flex-1 px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white rounded-lg text-sm font-medium hover:shadow-md transition-all duration-200 disabled:from-gray-300 disabled:to-gray-300 disabled:cursor-not-allowed"
-                        >
-                          Save
-                        </button>
-                        <button
-                          onClick={handleCancelEdit}
-                          className="flex-1 px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all duration-200"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    // Display mode UI
-                    <>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-800">{vacation.name}</span>
-                          {isAuto && (
-                            <span className="text-xs px-2 py-0.5 bg-gray-200 text-gray-600 rounded-full">
-                              from calendar
+                const getWeekCellStyle = () => {
+                  if (!riskStatus) return 'text-gray-400'
+                  switch (riskStatus) {
+                    case 'safe':
+                      return 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700 hover:from-emerald-200 hover:to-green-200'
+                    case 'at-risk':
+                      return 'bg-gradient-to-br from-amber-100 to-yellow-100 text-amber-700 hover:from-amber-200 hover:to-yellow-200'
+                    case 'not-compliant':
+                      return 'bg-gradient-to-br from-red-100 to-rose-100 text-red-700 hover:from-red-200 hover:to-rose-200'
+                  }
+                }
+
+                return (
+                  <Fragment key={`week-row-${weekIndex}`}>
+                    {/* Week number cell - clickable */}
+                    <button
+                      onClick={() => week.weekNum !== null && setSelectedWeek(selectedWeek === week.weekNum ? null : week.weekNum)}
+                      disabled={week.weekNum === null}
+                      className={`flex flex-col items-center justify-center text-xs p-1 rounded-lg transition-all duration-200 ${
+                        getWeekCellStyle()
+                      } ${week.weekNum !== null ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : ''} ${
+                        selectedWeek === week.weekNum ? 'ring-2 ring-indigo-400 ring-offset-1' : ''
+                      }`}
+                    >
+                      {week.weekNum !== null && (
+                        <>
+                          <span className="font-bold">{week.weekNum}</span>
+                          {compliance && (
+                            <span className="text-[10px] opacity-75">
+                              {compliance.compliantWeeks}/{compliance.windowSize}
                             </span>
                           )}
-                          <span className="text-gray-500">({formatVacationDateRange(vacation)})</span>
-                        </div>
-                        {!isAuto && (
-                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                            <button
-                              onClick={() => handleStartEdit(vacation)}
-                              className="p-2 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-lg transition-all duration-200"
-                              title="Edit vacation"
-                            >
-                              <PencilIcon />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteVacation(vacation.id)}
-                              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all duration-200"
-                              title="Delete vacation"
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Day cells */}
+                    {week.days.map((day, dayIndex) => (
+                      <div key={`${weekIndex}-${dayIndex}`} className="aspect-square">
+                        {day !== null ? (
+                          <button
+                            data-day={day}
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              handleDragStart(day)
+                            }}
+                            onMouseEnter={() => handleDragMove(day)}
+                            onTouchStart={(e) => {
+                              e.preventDefault()
+                              handleDragStart(day)
+                            }}
+                            className={`w-full h-full flex items-center justify-center rounded-lg border text-sm font-medium transition-all duration-200 hover:scale-105 touch-none ${
+                              isSettingStartWeek
+                                ? 'border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 hover:shadow-md'
+                                : 'border-gray-200 hover:shadow-sm'
+                            } ${STATUS_STYLES[dayStatus[dateKeyFromParts(viewYear, viewMonth, day)] || 'not-set']}`}
+                          >
+                            {day}
+                          </button>
+                        ) : (
+                          <div className="w-full h-full" />
                         )}
                       </div>
-                      <div className={`text-sm mt-2 font-medium ${
-                        impact === 'ok' ? 'text-emerald-600' :
-                        impact === 'at-risk' ? 'text-amber-600' :
-                        'text-red-600'
-                      }`}>
-                        {getImpactLabel(impact)} - {getImpactDescription(vacation, impact)}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {allVacations.length === 0 && !showVacationForm && (
-          <div className="text-center py-8">
-            <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl mb-3">
-              <CalendarIcon />
+                    ))}
+                  </Fragment>
+                )
+              })}
             </div>
-            <p className="text-gray-500">
-              No vacations planned. Click &quot;+ Add Vacation&quot; to plan time off.
-            </p>
           </div>
-        )}
+
+          {/* Legend */}
+          <div className="flex flex-wrap gap-6 justify-center text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 bg-white border border-gray-200 rounded-lg shadow-sm" />
+              <span className="text-gray-600">Not Set</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 bg-gradient-to-br from-emerald-400 to-green-500 rounded-lg shadow-sm" />
+              <span className="text-gray-600">Office</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-lg shadow-sm" />
+              <span className="text-gray-600">OOF</span>
+            </div>
+          </div>
+        </div>
+        {/* End Right Column */}
       </div>
+      {/* End Two-column layout */}
 
       {/* Footer */}
       <div className="pt-8 pb-4 text-center flex items-center justify-center gap-3">
