@@ -286,6 +286,53 @@ function getAffectedWeeks(vacation: VacationEvent, startWeekDate: Date): number[
   return Array.from(weekNumbers).sort((a, b) => a - b)
 }
 
+// Helper to check if a week is compliant given vacation dates
+function isWeekCompliantWithVacation(
+  weekNum: number,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>,
+  vacationDates: Set<string>
+): boolean {
+  const weekStart = getWeekStartDate(weekNum, startWeekDate)
+  let officeDays = 0
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart)
+    d.setDate(d.getDate() + i)
+    const dayOfWeek = d.getDay()
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      const key = dateKey(d)
+      if (!vacationDates.has(key) && dayStatus[key] === 'office') {
+        officeDays++
+      }
+    }
+  }
+  return officeDays >= REQUIRED_DAYS_PER_WEEK
+}
+
+// Calculate rolling compliance for a specific week with vacation
+function getRollingComplianceWithVacation(
+  weekNum: number,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>,
+  vacationDates: Set<string>
+): { compliantWeeks: number; windowSize: number; required: number } {
+  const windowSize = Math.min(ROLLING_WINDOW_WEEKS, weekNum)
+  const startWeek = weekNum - windowSize + 1
+
+  let compliantWeeks = 0
+  for (let w = startWeek; w <= weekNum; w++) {
+    if (isWeekCompliantWithVacation(w, startWeekDate, dayStatus, vacationDates)) {
+      compliantWeeks++
+    }
+  }
+
+  const required = weekNum >= ROLLING_WINDOW_WEEKS
+    ? REQUIRED_COMPLIANT_WEEKS
+    : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
+
+  return { compliantWeeks, windowSize, required }
+}
+
 function calculateVacationImpact(
   vacation: VacationEvent,
   startWeekDate: Date,
@@ -309,44 +356,31 @@ function calculateVacationImpact(
     }
   }
 
-  // Find the maximum week number we need to consider
+  // Find the affected weeks
   const affectedWeeks = getAffectedWeeks(vacation, startWeekDate)
   if (affectedWeeks.length === 0) {
     return 'ok' // Vacation is before tracking period
   }
 
-  const maxWeek = Math.max(...affectedWeeks, ROLLING_WINDOW_WEEKS)
+  // Only evaluate weeks >= 13 (first 12 weeks are ramp-up period)
+  const weeksToEvaluate = affectedWeeks.filter(w => w >= 13)
+  if (weeksToEvaluate.length === 0) {
+    return 'ok' // Vacation only affects ramp-up period (weeks 1-12)
+  }
 
-  // Calculate compliance for affected weeks treating vacation days as non-office
-  let totalCompliantWeeks = 0
-  for (let w = 1; w <= maxWeek; w++) {
-    const weekStart = getWeekStartDate(w, startWeekDate)
-    let officeDays = 0
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(weekStart)
-      d.setDate(d.getDate() + i)
-      const dayOfWeek = d.getDay()
-      // Only count weekdays (Mon-Fri)
-      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-        const key = dateKey(d)
-        // If it's a vacation day, don't count it as office
-        if (!vacationDates.has(key) && dayStatus[key] === 'office') {
-          officeDays++
-        }
-      }
-    }
-    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
-      totalCompliantWeeks++
+  // Check rolling compliance for each affected week and find the worst case
+  let worstBuffer = Infinity
+  for (const weekNum of weeksToEvaluate) {
+    const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
+    const buffer = compliance.compliantWeeks - compliance.required
+    if (buffer < worstBuffer) {
+      worstBuffer = buffer
     }
   }
 
-  // For a 12-week window, we need 8 compliant weeks
-  // Calculate buffer
-  const buffer = totalCompliantWeeks - REQUIRED_COMPLIANT_WEEKS
-
-  if (buffer < 0) {
+  if (worstBuffer < 0) {
     return 'not-allowed' // Would break compliance
-  } else if (buffer <= 1) {
+  } else if (worstBuffer <= 1) {
     return 'at-risk' // 0-1 weeks buffer (exactly at limit or marginal)
   } else {
     return 'ok' // 2+ weeks buffer
@@ -677,7 +711,7 @@ export default function Calendar() {
   const getImpactDescription = (vacation: VacationEvent, impact: ComplianceImpact): string => {
     if (!startWeekDate) return ''
 
-    // Calculate buffer for description
+    // Calculate vacation dates
     const vacationDates = new Set<string>()
     for (const dateStr of getVacationDates(vacation)) {
       vacationDates.add(dateStr)
@@ -691,34 +725,33 @@ export default function Calendar() {
     }
 
     const affectedWeeks = getAffectedWeeks(vacation, startWeekDate)
-    const maxWeek = affectedWeeks.length > 0 ? Math.max(...affectedWeeks, ROLLING_WINDOW_WEEKS) : ROLLING_WINDOW_WEEKS
+    if (affectedWeeks.length === 0) return 'before tracking period'
 
-    let totalCompliantWeeks = 0
-    for (let w = 1; w <= maxWeek; w++) {
-      const weekStart = getWeekStartDate(w, startWeekDate)
-      let officeDays = 0
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(weekStart)
-        d.setDate(d.getDate() + i)
-        const dayOfWeek = d.getDay()
-        if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-          const key = dateKey(d)
-          if (!vacationDates.has(key) && dayStatus[key] === 'office') {
-            officeDays++
-          }
-        }
-      }
-      if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
-        totalCompliantWeeks++
+    // Only evaluate weeks >= 13 (first 12 weeks are ramp-up period)
+    const weeksToEvaluate = affectedWeeks.filter(w => w >= 13)
+    if (weeksToEvaluate.length === 0) return 'ramp-up period (weeks 1-12)'
+
+    // Find the worst week (lowest buffer)
+    let worstWeek = weeksToEvaluate[0]
+    let worstBuffer = Infinity
+    let worstCompliance = { compliantWeeks: 0, windowSize: 0, required: 0 }
+
+    for (const weekNum of weeksToEvaluate) {
+      const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
+      const buffer = compliance.compliantWeeks - compliance.required
+      if (buffer < worstBuffer) {
+        worstBuffer = buffer
+        worstWeek = weekNum
+        worstCompliance = compliance
       }
     }
 
-    const buffer = totalCompliantWeeks - REQUIRED_COMPLIANT_WEEKS
-
     switch (impact) {
-      case 'ok': return `${buffer} weeks buffer`
-      case 'at-risk': return buffer === 0 ? 'exactly at limit' : '1 week buffer'
-      case 'not-allowed': return `${Math.abs(buffer)} weeks short`
+      case 'ok': return `${worstBuffer} week${worstBuffer !== 1 ? 's' : ''} buffer`
+      case 'at-risk': return worstBuffer === 0 ? 'exactly at limit' : '1 week buffer'
+      case 'not-allowed':
+        const needed = worstCompliance.required - worstCompliance.compliantWeeks
+        return `week ${worstWeek}: ${worstCompliance.compliantWeeks}/${worstCompliance.windowSize} compliant, needs ${needed} more`
     }
   }
 
