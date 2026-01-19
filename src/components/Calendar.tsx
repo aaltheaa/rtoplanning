@@ -362,15 +362,22 @@ function calculateVacationImpact(
     return 'ok' // Vacation is before tracking period
   }
 
-  // Only evaluate weeks >= 13 (first 12 weeks are ramp-up period)
-  const weeksToEvaluate = affectedWeeks.filter(w => w >= 13)
-  if (weeksToEvaluate.length === 0) {
-    return 'ok' // Vacation only affects ramp-up period (weeks 1-12)
+  // Build list of weeks to evaluate:
+  // - All affected weeks >= 13 (rolling window evaluation)
+  // - Always include week 12 if vacation affects any week <= 12 (to check 8/12 requirement)
+  const weeksToEvaluate = new Set(affectedWeeks.filter(w => w >= 13))
+  const affectsEarlyWeeks = affectedWeeks.some(w => w <= 12)
+  if (affectsEarlyWeeks) {
+    weeksToEvaluate.add(12) // Check if 8/12 will be met by week 12
   }
 
-  // Check rolling compliance for each affected week and find the worst case
+  if (weeksToEvaluate.size === 0) {
+    return 'ok'
+  }
+
+  // Check rolling compliance for each week and find the worst case
   let worstBuffer = Infinity
-  for (const weekNum of weeksToEvaluate) {
+  for (const weekNum of Array.from(weeksToEvaluate)) {
     const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
     const buffer = compliance.compliantWeeks - compliance.required
     if (buffer < worstBuffer) {
@@ -727,16 +734,23 @@ export default function Calendar() {
     const affectedWeeks = getAffectedWeeks(vacation, startWeekDate)
     if (affectedWeeks.length === 0) return 'before tracking period'
 
-    // Only evaluate weeks >= 13 (first 12 weeks are ramp-up period)
-    const weeksToEvaluate = affectedWeeks.filter(w => w >= 13)
-    if (weeksToEvaluate.length === 0) return 'ramp-up period (weeks 1-12)'
+    // Build list of weeks to evaluate:
+    // - All affected weeks >= 13 (rolling window evaluation)
+    // - Always include week 12 if vacation affects any week <= 12 (to check 8/12 requirement)
+    const weeksToEvaluate = new Set(affectedWeeks.filter(w => w >= 13))
+    const affectsEarlyWeeks = affectedWeeks.some(w => w <= 12)
+    if (affectsEarlyWeeks) {
+      weeksToEvaluate.add(12)
+    }
+
+    if (weeksToEvaluate.size === 0) return 'before tracking period'
 
     // Find the worst week (lowest buffer)
-    let worstWeek = weeksToEvaluate[0]
+    let worstWeek = Array.from(weeksToEvaluate)[0]
     let worstBuffer = Infinity
     let worstCompliance = { compliantWeeks: 0, windowSize: 0, required: 0 }
 
-    for (const weekNum of weeksToEvaluate) {
+    for (const weekNum of Array.from(weeksToEvaluate)) {
       const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
       const buffer = compliance.compliantWeeks - compliance.required
       if (buffer < worstBuffer) {
@@ -751,7 +765,10 @@ export default function Calendar() {
       case 'at-risk': return worstBuffer === 0 ? 'exactly at limit' : '1 week buffer'
       case 'not-allowed':
         const needed = worstCompliance.required - worstCompliance.compliantWeeks
-        return `week ${worstWeek}: ${worstCompliance.compliantWeeks}/${worstCompliance.windowSize} compliant, needs ${needed} more`
+        if (worstWeek === 12) {
+          return `by week 12 only ${worstCompliance.compliantWeeks}/${worstCompliance.windowSize} compliant, need ${needed} more week${needed !== 1 ? 's' : ''} in office`
+        }
+        return `by week ${worstWeek} only ${worstCompliance.compliantWeeks}/${worstCompliance.windowSize} compliant, need ${needed} more week${needed !== 1 ? 's' : ''} in office`
     }
   }
 
