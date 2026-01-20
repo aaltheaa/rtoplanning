@@ -628,13 +628,16 @@ export default function Calendar() {
 
   // Save and copy link handler
   const handleSaveAndCopyLink = useCallback(() => {
+    // Generate short random ID (6 chars) for uniqueness
+    const randomId = Math.random().toString(36).substring(2, 8)
+
     const data = {
       s: startWeekDate ? dateKey(startWeekDate) : null,
       d: compressDayStatus(dayStatus),
       v: compressVacations(manualVacations),
     }
     const encoded = btoa(JSON.stringify(data))
-    const url = `${window.location.origin}${window.location.pathname}?d=${encoded}`
+    const url = `${window.location.origin}${window.location.pathname}?d=${encoded}&id=${randomId}`
     navigator.clipboard.writeText(url)
     setCopyFeedback(true)
     setTimeout(() => setCopyFeedback(false), 2000)
