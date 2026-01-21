@@ -14,6 +14,7 @@ interface VacationEvent {
 }
 
 type ComplianceImpact = 'ok' | 'at-risk' | 'not-allowed'
+type ComplianceAlgorithm = 'count' | 'average'
 
 const STATUS_CYCLE: AttendanceStatus[] = ['not-set', 'office', 'oof']
 
@@ -142,30 +143,66 @@ function getOfficeDaysInWeek(weekStartDate: Date, dayStatus: Record<string, Atte
 function getRollingCompliance(
   weekNum: number,
   startWeekDate: Date,
-  dayStatus: Record<string, AttendanceStatus>
-): { compliantWeeks: number; windowSize: number; isCompliant: boolean } {
+  dayStatus: Record<string, AttendanceStatus>,
+  algorithm: ComplianceAlgorithm = 'count',
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
+): { compliantWeeks: number; windowSize: number; isCompliant: boolean; average?: number } {
   const windowSize = Math.min(ROLLING_WINDOW_WEEKS, weekNum)
   const startWeek = weekNum - windowSize + 1
 
-  let compliantWeeks = 0
+  // Collect office days per week
+  const weekOfficeDays: number[] = []
   for (let w = startWeek; w <= weekNum; w++) {
     const weekStart = getWeekStartDate(w, startWeekDate)
     const officeDays = getOfficeDaysInWeek(weekStart, dayStatus)
-    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
-      compliantWeeks++
-    }
+    weekOfficeDays.push(officeDays)
   }
 
-  // For full 12-week windows, need 8 compliant weeks
-  // For smaller windows (first 12 weeks), proportionally scale the requirement
-  const requiredForWindow = weekNum >= ROLLING_WINDOW_WEEKS
-    ? REQUIRED_COMPLIANT_WEEKS
-    : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
+  if (algorithm === 'count') {
+    // Count-based: count weeks with >= requiredDays
+    let compliantWeeks = 0
+    for (const days of weekOfficeDays) {
+      if (days >= requiredDays) {
+        compliantWeeks++
+      }
+    }
 
-  return {
-    compliantWeeks,
-    windowSize,
-    isCompliant: compliantWeeks >= requiredForWindow,
+    const requiredForWindow = weekNum >= ROLLING_WINDOW_WEEKS
+      ? REQUIRED_COMPLIANT_WEEKS
+      : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
+
+    return {
+      compliantWeeks,
+      windowSize,
+      isCompliant: compliantWeeks >= requiredForWindow,
+    }
+  } else {
+    // Average-based: take best N weeks, calculate average
+    const requiredWeeks = weekNum >= ROLLING_WINDOW_WEEKS
+      ? REQUIRED_COMPLIANT_WEEKS
+      : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
+
+    // Sort descending to get best weeks
+    const sortedDays = [...weekOfficeDays].sort((a, b) => b - a)
+    const bestWeeks = sortedDays.slice(0, requiredWeeks)
+    const average = bestWeeks.length > 0
+      ? bestWeeks.reduce((sum, d) => sum + d, 0) / bestWeeks.length
+      : 0
+
+    // Count how many weeks meet the threshold (for display purposes)
+    let compliantWeeks = 0
+    for (const days of weekOfficeDays) {
+      if (days >= requiredDays) {
+        compliantWeeks++
+      }
+    }
+
+    return {
+      compliantWeeks,
+      windowSize,
+      isCompliant: average >= requiredDays,
+      average,
+    }
   }
 }
 
@@ -174,11 +211,21 @@ type WeekRiskStatus = 'safe' | 'at-risk' | 'not-compliant'
 function getWeekRiskStatus(
   weekNum: number,
   startWeekDate: Date,
-  dayStatus: Record<string, AttendanceStatus>
+  dayStatus: Record<string, AttendanceStatus>,
+  algorithm: ComplianceAlgorithm = 'count',
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
 ): WeekRiskStatus {
-  const compliance = getRollingCompliance(weekNum, startWeekDate, dayStatus)
+  const compliance = getRollingCompliance(weekNum, startWeekDate, dayStatus, algorithm, requiredDays)
 
-  // For full 12-week windows, check buffer
+  if (algorithm === 'average') {
+    // For average-based, check how close the average is to the threshold
+    if (!compliance.isCompliant) return 'not-compliant'
+    const buffer = (compliance.average ?? 0) - requiredDays
+    if (buffer < 0.5) return 'at-risk' // Average very close to threshold
+    return 'safe'
+  }
+
+  // For count-based, check buffer
   if (compliance.windowSize >= ROLLING_WINDOW_WEEKS) {
     const buffer = compliance.compliantWeeks - REQUIRED_COMPLIANT_WEEKS
     if (buffer < 0) return 'not-compliant'
@@ -287,13 +334,13 @@ function getAffectedWeeks(vacation: VacationEvent, startWeekDate: Date): number[
   return Array.from(weekNumbers).sort((a, b) => a - b)
 }
 
-// Helper to check if a week is compliant given vacation dates
-function isWeekCompliantWithVacation(
+// Helper to get office days in a week excluding vacation dates
+function getOfficeDaysInWeekWithVacation(
   weekNum: number,
   startWeekDate: Date,
   dayStatus: Record<string, AttendanceStatus>,
   vacationDates: Set<string>
-): boolean {
+): number {
   const weekStart = getWeekStartDate(weekNum, startWeekDate)
   let officeDays = 0
   for (let i = 0; i < 7; i++) {
@@ -307,7 +354,19 @@ function isWeekCompliantWithVacation(
       }
     }
   }
-  return officeDays >= REQUIRED_DAYS_PER_WEEK
+  return officeDays
+}
+
+// Helper to check if a week is compliant given vacation dates
+function isWeekCompliantWithVacation(
+  weekNum: number,
+  startWeekDate: Date,
+  dayStatus: Record<string, AttendanceStatus>,
+  vacationDates: Set<string>,
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
+): boolean {
+  const officeDays = getOfficeDaysInWeekWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
+  return officeDays >= requiredDays
 }
 
 // Calculate rolling compliance for a specific week with vacation
@@ -315,30 +374,70 @@ function getRollingComplianceWithVacation(
   weekNum: number,
   startWeekDate: Date,
   dayStatus: Record<string, AttendanceStatus>,
-  vacationDates: Set<string>
-): { compliantWeeks: number; windowSize: number; required: number } {
+  vacationDates: Set<string>,
+  algorithm: ComplianceAlgorithm = 'count',
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
+): { compliantWeeks: number; windowSize: number; required: number; isCompliant: boolean; average?: number } {
   const windowSize = Math.min(ROLLING_WINDOW_WEEKS, weekNum)
   const startWeek = weekNum - windowSize + 1
 
-  let compliantWeeks = 0
+  // Collect office days per week
+  const weekOfficeDays: number[] = []
   for (let w = startWeek; w <= weekNum; w++) {
-    if (isWeekCompliantWithVacation(w, startWeekDate, dayStatus, vacationDates)) {
-      compliantWeeks++
-    }
+    const days = getOfficeDaysInWeekWithVacation(w, startWeekDate, dayStatus, vacationDates)
+    weekOfficeDays.push(days)
   }
 
   const required = weekNum >= ROLLING_WINDOW_WEEKS
     ? REQUIRED_COMPLIANT_WEEKS
     : Math.ceil((REQUIRED_COMPLIANT_WEEKS / ROLLING_WINDOW_WEEKS) * windowSize)
 
-  return { compliantWeeks, windowSize, required }
+  if (algorithm === 'count') {
+    let compliantWeeks = 0
+    for (const days of weekOfficeDays) {
+      if (days >= requiredDays) {
+        compliantWeeks++
+      }
+    }
+
+    return {
+      compliantWeeks,
+      windowSize,
+      required,
+      isCompliant: compliantWeeks >= required,
+    }
+  } else {
+    // Average-based
+    const sortedDays = [...weekOfficeDays].sort((a, b) => b - a)
+    const bestWeeks = sortedDays.slice(0, required)
+    const average = bestWeeks.length > 0
+      ? bestWeeks.reduce((sum, d) => sum + d, 0) / bestWeeks.length
+      : 0
+
+    let compliantWeeks = 0
+    for (const days of weekOfficeDays) {
+      if (days >= requiredDays) {
+        compliantWeeks++
+      }
+    }
+
+    return {
+      compliantWeeks,
+      windowSize,
+      required,
+      isCompliant: average >= requiredDays,
+      average,
+    }
+  }
 }
 
 function calculateVacationImpact(
   vacation: VacationEvent,
   startWeekDate: Date,
   dayStatus: Record<string, AttendanceStatus>,
-  existingVacations: VacationEvent[]
+  existingVacations: VacationEvent[],
+  algorithm: ComplianceAlgorithm = 'count',
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
 ): ComplianceImpact {
   // Create a modified dayStatus treating vacation days as non-office
   const vacationDates = new Set<string>()
@@ -378,30 +477,48 @@ function calculateVacationImpact(
 
   // Check rolling compliance for each week and find the worst case
   let worstBuffer = Infinity
+  let worstIsCompliant = true
   for (const weekNum of Array.from(weeksToEvaluate)) {
-    const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
-    const buffer = compliance.compliantWeeks - compliance.required
-    if (buffer < worstBuffer) {
-      worstBuffer = buffer
+    const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates, algorithm, requiredDays)
+
+    if (!compliance.isCompliant) {
+      worstIsCompliant = false
+      worstBuffer = -1
+      break
+    }
+
+    if (algorithm === 'average') {
+      const buffer = (compliance.average ?? 0) - requiredDays
+      if (buffer < worstBuffer) {
+        worstBuffer = buffer
+      }
+    } else {
+      const buffer = compliance.compliantWeeks - compliance.required
+      if (buffer < worstBuffer) {
+        worstBuffer = buffer
+      }
     }
   }
 
-  if (worstBuffer < 0) {
+  if (!worstIsCompliant || worstBuffer < 0) {
     return 'not-allowed' // Would break compliance
-  } else if (worstBuffer <= 1) {
-    return 'at-risk' // 0-1 weeks buffer (exactly at limit or marginal)
+  } else if (algorithm === 'average' ? worstBuffer < 0.5 : worstBuffer <= 1) {
+    return 'at-risk' // Close to limit
   } else {
-    return 'ok' // 2+ weeks buffer
+    return 'ok' // Good buffer
   }
 }
 
 function calculateOpenWeeks(
   startWeekDate: Date,
   dayStatus: Record<string, AttendanceStatus>,
-  vacations: VacationEvent[]
+  vacations: VacationEvent[],
+  algorithm: ComplianceAlgorithm = 'count',
+  requiredDays: number = REQUIRED_DAYS_PER_WEEK
 ): {
   availableWeeksOff: number
   currentCompliantWeeks: number
+  average?: number
 } {
   // Collect all vacation dates
   const vacationDates = new Set<string>()
@@ -411,8 +528,8 @@ function calculateOpenWeeks(
     }
   }
 
-  // Count compliant weeks in the 12-week window (accounting for existing vacations)
-  let compliantWeeks = 0
+  // Collect office days per week
+  const weekOfficeDays: number[] = []
   for (let w = 1; w <= ROLLING_WINDOW_WEEKS; w++) {
     const weekStart = getWeekStartDate(w, startWeekDate)
     let officeDays = 0
@@ -420,21 +537,44 @@ function calculateOpenWeeks(
       const d = new Date(weekStart)
       d.setDate(d.getDate() + i)
       const dayOfWeek = d.getDay()
-      // Only count weekdays (Mon-Fri)
       if (dayOfWeek >= 1 && dayOfWeek <= 5) {
         const key = dateKey(d)
-        // If it's a vacation day, don't count it as office
         if (!vacationDates.has(key) && dayStatus[key] === 'office') {
           officeDays++
         }
       }
     }
-    if (officeDays >= REQUIRED_DAYS_PER_WEEK) {
+    weekOfficeDays.push(officeDays)
+  }
+
+  // Count compliant weeks
+  let compliantWeeks = 0
+  for (const days of weekOfficeDays) {
+    if (days >= requiredDays) {
       compliantWeeks++
     }
   }
 
-  // Calculate buffer: availableWeeksOff = compliantWeeks - REQUIRED_COMPLIANT_WEEKS
+  if (algorithm === 'average') {
+    // For average-based, calculate average of best 8 weeks
+    const sortedDays = [...weekOfficeDays].sort((a, b) => b - a)
+    const bestWeeks = sortedDays.slice(0, REQUIRED_COMPLIANT_WEEKS)
+    const average = bestWeeks.length > 0
+      ? bestWeeks.reduce((sum, d) => sum + d, 0) / bestWeeks.length
+      : 0
+
+    // Buffer is how much average exceeds required
+    const bufferDays = average - requiredDays
+    const availableWeeksOff = Math.max(0, Math.floor(bufferDays))
+
+    return {
+      availableWeeksOff,
+      currentCompliantWeeks: compliantWeeks,
+      average,
+    }
+  }
+
+  // For count-based
   const availableWeeksOff = Math.max(0, compliantWeeks - REQUIRED_COMPLIANT_WEEKS)
 
   return {
@@ -517,6 +657,11 @@ export default function Calendar() {
 
   // Copy link feedback state
   const [copyFeedback, setCopyFeedback] = useState(false)
+
+  // Compliance settings state
+  const [complianceAlgorithm, setComplianceAlgorithm] = useState<ComplianceAlgorithm>('count')
+  const [requiredDaysPerWeek, setRequiredDaysPerWeek] = useState(REQUIRED_DAYS_PER_WEEK)
+  const [showComplianceSettings, setShowComplianceSettings] = useState(false)
 
   // Generate auto-vacations from OOF days and combine with manual vacations
   const manualVacations = vacations.filter(v => !v.isAutoGenerated)
@@ -635,16 +780,38 @@ export default function Calendar() {
       s: startWeekDate ? dateKey(startWeekDate) : null,
       d: compressDayStatus(dayStatus),
       v: compressVacations(manualVacations),
+      alg: complianceAlgorithm,
+      days: requiredDaysPerWeek,
     }
     const encoded = btoa(JSON.stringify(data))
     const url = `${window.location.origin}${window.location.pathname}?d=${encoded}&id=${randomId}`
     navigator.clipboard.writeText(url)
     setCopyFeedback(true)
     setTimeout(() => setCopyFeedback(false), 2000)
-  }, [startWeekDate, dayStatus, manualVacations])
+  }, [startWeekDate, dayStatus, manualVacations, complianceAlgorithm, requiredDaysPerWeek])
 
-  // Load data from URL on mount
+  // Save settings to localStorage
   useEffect(() => {
+    localStorage.setItem('rto-compliance-algorithm', complianceAlgorithm)
+    localStorage.setItem('rto-required-days', String(requiredDaysPerWeek))
+  }, [complianceAlgorithm, requiredDaysPerWeek])
+
+  // Load data from localStorage and URL on mount
+  useEffect(() => {
+    // First, try to load settings from localStorage
+    const savedAlgorithm = localStorage.getItem('rto-compliance-algorithm') as ComplianceAlgorithm | null
+    const savedDays = localStorage.getItem('rto-required-days')
+    if (savedAlgorithm && (savedAlgorithm === 'count' || savedAlgorithm === 'average')) {
+      setComplianceAlgorithm(savedAlgorithm)
+    }
+    if (savedDays) {
+      const parsedDays = parseInt(savedDays, 10)
+      if (parsedDays >= 1 && parsedDays <= 5) {
+        setRequiredDaysPerWeek(parsedDays)
+      }
+    }
+
+    // Then, load from URL (URL takes precedence)
     const data = searchParams.get('d')
     if (data) {
       try {
@@ -652,6 +819,13 @@ export default function Calendar() {
         if (decoded.s) setStartWeekDate(new Date(decoded.s + 'T00:00:00'))
         if (decoded.d) setDayStatus(expandDayStatus(decoded.d))
         if (decoded.v) setVacations(expandVacations(decoded.v))
+        // Load settings from URL if present (takes precedence over localStorage)
+        if (decoded.alg && (decoded.alg === 'count' || decoded.alg === 'average')) {
+          setComplianceAlgorithm(decoded.alg)
+        }
+        if (decoded.days && typeof decoded.days === 'number' && decoded.days >= 1 && decoded.days <= 5) {
+          setRequiredDaysPerWeek(decoded.days)
+        }
       } catch (e) {
         console.error('Failed to load saved data:', e)
       }
@@ -829,11 +1003,13 @@ export default function Calendar() {
     // Find the worst week (lowest buffer)
     let worstWeek = Array.from(weeksToEvaluate)[0]
     let worstBuffer = Infinity
-    let worstCompliance = { compliantWeeks: 0, windowSize: 0, required: 0 }
+    let worstCompliance: { compliantWeeks: number; windowSize: number; required: number; average?: number } = { compliantWeeks: 0, windowSize: 0, required: 0 }
 
     for (const weekNum of Array.from(weeksToEvaluate)) {
-      const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates)
-      const buffer = compliance.compliantWeeks - compliance.required
+      const compliance = getRollingComplianceWithVacation(weekNum, startWeekDate, dayStatus, vacationDates, complianceAlgorithm, requiredDaysPerWeek)
+      const buffer = complianceAlgorithm === 'average'
+        ? (compliance.average ?? 0) - requiredDaysPerWeek
+        : compliance.compliantWeeks - compliance.required
       if (buffer < worstBuffer) {
         worstBuffer = buffer
         worstWeek = weekNum
@@ -841,8 +1017,20 @@ export default function Calendar() {
       }
     }
 
+    if (complianceAlgorithm === 'average') {
+      switch (impact) {
+        case 'ok':
+          const bufferDays = worstBuffer.toFixed(1)
+          return `avg ${worstCompliance.average?.toFixed(1)} days (+${bufferDays} buffer)`
+        case 'at-risk':
+          return `avg ${worstCompliance.average?.toFixed(1)} days (close to ${requiredDaysPerWeek})`
+        case 'not-allowed':
+          return `avg ${worstCompliance.average?.toFixed(1)} days (need ${requiredDaysPerWeek})`
+      }
+    }
+
     switch (impact) {
-      case 'ok': return `${worstBuffer} week${worstBuffer !== 1 ? 's' : ''} buffer`
+      case 'ok': return `${Math.floor(worstBuffer)} week${Math.floor(worstBuffer) !== 1 ? 's' : ''} buffer`
       case 'at-risk': return worstBuffer === 0 ? 'exactly at limit' : '1 week buffer'
       case 'not-allowed':
         const needed = worstCompliance.required - worstCompliance.compliantWeeks
@@ -880,7 +1068,7 @@ export default function Calendar() {
 
   // Calculate open weeks for display
   const openWeeksData = startWeekDate
-    ? calculateOpenWeeks(startWeekDate, dayStatus, allVacations)
+    ? calculateOpenWeeks(startWeekDate, dayStatus, allVacations, complianceAlgorithm, requiredDaysPerWeek)
     : null
 
   return (
@@ -899,15 +1087,89 @@ export default function Calendar() {
       <div className="flex flex-col lg:flex-row gap-6 items-stretch justify-center">
         {/* Left Column - Compliance hint and Vacation planning */}
         <div className="w-full lg:w-80 flex flex-col space-y-4 order-last lg:order-first">
-          {/* Compliance Rule Hint Card */}
+          {/* Compliance Settings Card */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-            <div className="flex items-center gap-2 text-gray-700 mb-2">
-              <InfoIcon />
-              <span className="font-semibold">Compliance Rule</span>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2 text-gray-700">
+                <InfoIcon />
+                <span className="font-semibold">Compliance Rule</span>
+              </div>
+              <button
+                onClick={() => setShowComplianceSettings(!showComplianceSettings)}
+                className="p-1.5 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+                title="Configure compliance settings"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                </svg>
+              </button>
             </div>
+
+            {/* Current settings display */}
             <p className="text-sm text-gray-600">
-              {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks must have {REQUIRED_DAYS_PER_WEEK}+ office days in any rolling 12-week window.
+              {complianceAlgorithm === 'count' ? (
+                <>Best {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks, each with {requiredDaysPerWeek}+ office days</>
+              ) : (
+                <>Best {REQUIRED_COMPLIANT_WEEKS}/{ROLLING_WINDOW_WEEKS} weeks must average {requiredDaysPerWeek}+ days</>
+              )}
             </p>
+
+            {/* Expandable Settings Panel */}
+            {showComplianceSettings && (
+              <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                {/* Algorithm selection */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Algorithm</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setComplianceAlgorithm('count')}
+                      className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
+                        complianceAlgorithm === 'count'
+                          ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Count-based
+                    </button>
+                    <button
+                      onClick={() => setComplianceAlgorithm('average')}
+                      className={`flex-1 px-3 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
+                        complianceAlgorithm === 'average'
+                          ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Average-based
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1.5">
+                    {complianceAlgorithm === 'count'
+                      ? 'Each of your best 8 weeks must have the required days'
+                      : 'Your best 8 weeks must average the required days (allows some light weeks if balanced by heavier ones)'}
+                  </p>
+                </div>
+
+                {/* Required days selection */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1.5">Required days per week</label>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map(days => (
+                      <button
+                        key={days}
+                        onClick={() => setRequiredDaysPerWeek(days)}
+                        className={`flex-1 px-2 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
+                          requiredDaysPerWeek === days
+                            ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-sm'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        {days}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Vacation Planning Section - grows to fill, scrollable */}
@@ -973,7 +1235,7 @@ export default function Calendar() {
               {allVacations.length > 0 ? (
                 allVacations.map(vacation => {
                   const impact = startWeekDate
-                    ? calculateVacationImpact(vacation, startWeekDate, dayStatus, allVacations)
+                    ? calculateVacationImpact(vacation, startWeekDate, dayStatus, allVacations, complianceAlgorithm, requiredDaysPerWeek)
                     : 'ok'
                   const isEditing = editingVacationId === vacation.id
                   const isAuto = vacation.isAutoGenerated
@@ -1162,10 +1424,10 @@ export default function Calendar() {
                 {(() => {
                   const weekStart = getWeekStartDate(selectedWeek, startWeekDate)
                   const officeDaysThisWeek = getOfficeDaysInWeek(weekStart, dayStatus)
-                  const compliance = getRollingCompliance(selectedWeek, startWeekDate, dayStatus)
-                  const riskStatus = getWeekRiskStatus(selectedWeek, startWeekDate, dayStatus)
-                  const officeDaysNeeded = Math.max(0, REQUIRED_DAYS_PER_WEEK - officeDaysThisWeek)
-                  const isWeekCompliant = officeDaysThisWeek >= REQUIRED_DAYS_PER_WEEK
+                  const compliance = getRollingCompliance(selectedWeek, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
+                  const riskStatus = getWeekRiskStatus(selectedWeek, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
+                  const officeDaysNeeded = Math.max(0, requiredDaysPerWeek - officeDaysThisWeek)
+                  const isWeekCompliant = officeDaysThisWeek >= requiredDaysPerWeek
 
                   const requiredForWindow = selectedWeek >= ROLLING_WINDOW_WEEKS
                     ? REQUIRED_COMPLIANT_WEEKS
@@ -1231,23 +1493,48 @@ export default function Calendar() {
                           ? 'bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200'
                           : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200'
                       }`}>
-                        <p className="text-xs text-gray-600">
-                          Weeks {windowStartWeek}-{selectedWeek}: {compliance.compliantWeeks}/{compliance.windowSize} compliant
-                        </p>
-                        {riskStatus === 'not-compliant' && weeksNeeded > 0 && (
-                          <p className="text-xs text-red-600 mt-1">
-                            ❌ Need {weeksNeeded} more compliant week{weeksNeeded !== 1 ? 's' : ''}
-                          </p>
-                        )}
-                        {riskStatus === 'at-risk' && (
-                          <p className="text-xs text-amber-600 mt-1">
-                            ⚠️ At risk - {compliance.compliantWeeks - requiredForWindow} week buffer
-                          </p>
-                        )}
-                        {riskStatus === 'safe' && (
-                          <p className="text-xs text-emerald-600 mt-1">
-                            ✓ {compliance.compliantWeeks - requiredForWindow} week{compliance.compliantWeeks - requiredForWindow !== 1 ? 's' : ''} buffer
-                          </p>
+                        {complianceAlgorithm === 'average' ? (
+                          <>
+                            <p className="text-xs text-gray-600">
+                              Weeks {windowStartWeek}-{selectedWeek}: Average of best {requiredForWindow} = {compliance.average?.toFixed(1)} days
+                            </p>
+                            {riskStatus === 'not-compliant' && (
+                              <p className="text-xs text-red-600 mt-1">
+                                ❌ Average below {requiredDaysPerWeek} required days
+                              </p>
+                            )}
+                            {riskStatus === 'at-risk' && (
+                              <p className="text-xs text-amber-600 mt-1">
+                                ⚠️ Average close to threshold ({requiredDaysPerWeek} days)
+                              </p>
+                            )}
+                            {riskStatus === 'safe' && (
+                              <p className="text-xs text-emerald-600 mt-1">
+                                ✓ Average comfortably above {requiredDaysPerWeek} days
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xs text-gray-600">
+                              Weeks {windowStartWeek}-{selectedWeek}: {compliance.compliantWeeks}/{compliance.windowSize} compliant
+                            </p>
+                            {riskStatus === 'not-compliant' && weeksNeeded > 0 && (
+                              <p className="text-xs text-red-600 mt-1">
+                                ❌ Need {weeksNeeded} more compliant week{weeksNeeded !== 1 ? 's' : ''}
+                              </p>
+                            )}
+                            {riskStatus === 'at-risk' && (
+                              <p className="text-xs text-amber-600 mt-1">
+                                ⚠️ At risk - {compliance.compliantWeeks - requiredForWindow} week buffer
+                              </p>
+                            )}
+                            {riskStatus === 'safe' && (
+                              <p className="text-xs text-emerald-600 mt-1">
+                                ✓ {compliance.compliantWeeks - requiredForWindow} week{compliance.compliantWeeks - requiredForWindow !== 1 ? 's' : ''} buffer
+                              </p>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -1261,12 +1548,12 @@ export default function Calendar() {
                 const atRiskWeeks = weeks
                   .filter(week => {
                     if (week.weekNum === null || week.weekNum < 13) return false
-                    const riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
+                    const riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
                     return riskStatus === 'at-risk' || riskStatus === 'not-compliant'
                   })
                   .map(week => ({
                     weekNum: week.weekNum as number,
-                    status: getWeekRiskStatus(week.weekNum!, startWeekDate, dayStatus)
+                    status: getWeekRiskStatus(week.weekNum!, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
                   }))
                   .filter((item, index, arr) => arr.findIndex(x => x.weekNum === item.weekNum) === index) // Remove duplicates
 
@@ -1274,8 +1561,8 @@ export default function Calendar() {
                 const hasWeeksAfter12 = weeks.some(week => week.weekNum !== null && week.weekNum >= 13)
 
                 // Calculate first 12 weeks compliance
-                const first12Compliance = getRollingCompliance(12, startWeekDate, dayStatus)
-                const isFirst12Compliant = first12Compliance.compliantWeeks >= REQUIRED_COMPLIANT_WEEKS
+                const first12Compliance = getRollingCompliance(12, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
+                const isFirst12Compliant = first12Compliance.isCompliant
                 const weeksNeeded = REQUIRED_COMPLIANT_WEEKS - first12Compliance.compliantWeeks
 
                 return (
@@ -1328,12 +1615,16 @@ export default function Calendar() {
                     ) : isFirst12Compliant ? (
                       <p className="text-xs text-emerald-600 mt-2 flex items-center gap-1">
                         <span>✓</span>
-                        For the first 12 weeks, {first12Compliance.compliantWeeks}/12 weeks are compliant
+                        {complianceAlgorithm === 'average'
+                          ? `First 12 weeks: avg ${first12Compliance.average?.toFixed(1)} days (need ${requiredDaysPerWeek})`
+                          : `For the first 12 weeks, ${first12Compliance.compliantWeeks}/12 weeks are compliant`}
                       </p>
                     ) : (
                       <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
                         <span>✗</span>
-                        For the first 12 weeks, {first12Compliance.compliantWeeks}/12 weeks are compliant (need {weeksNeeded} more)
+                        {complianceAlgorithm === 'average'
+                          ? `First 12 weeks: avg ${first12Compliance.average?.toFixed(1)} days (need ${requiredDaysPerWeek})`
+                          : `For the first 12 weeks, ${first12Compliance.compliantWeeks}/12 weeks are compliant (need ${weeksNeeded} more)`}
                       </p>
                     )}
                   </>
@@ -1369,11 +1660,11 @@ export default function Calendar() {
 
               {/* Weeks */}
               {weeks.map((week, weekIndex) => {
-                let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean } | null = null
+                let compliance: { compliantWeeks: number; windowSize: number; isCompliant: boolean; average?: number } | null = null
                 let riskStatus: WeekRiskStatus | null = null
                 if (week.weekNum !== null && startWeekDate) {
-                  compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus)
-                  riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus)
+                  compliance = getRollingCompliance(week.weekNum, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
+                  riskStatus = getWeekRiskStatus(week.weekNum, startWeekDate, dayStatus, complianceAlgorithm, requiredDaysPerWeek)
                 }
 
                 const getWeekCellStyle = () => {
@@ -1405,7 +1696,9 @@ export default function Calendar() {
                           <span className="font-bold">{week.weekNum}</span>
                           {compliance && (
                             <span className="text-[10px] opacity-75">
-                              {compliance.compliantWeeks}/{compliance.windowSize}
+                              {complianceAlgorithm === 'average' && compliance.average !== undefined
+                                ? `Avg: ${Math.round(compliance.average)}`
+                                : `${compliance.compliantWeeks}/${compliance.windowSize}`}
                             </span>
                           )}
                         </>
