@@ -16,7 +16,7 @@ Track your office attendance with a simple calendar UI.
 
 ## Live site
 
-`https://rtoplanning.vercel.app/`
+[https://rtoplanning.vercel.app/](https://rtoplanning.vercel.app/)
 
 ## Local development
 
