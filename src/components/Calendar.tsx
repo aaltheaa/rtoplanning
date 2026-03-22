@@ -1762,14 +1762,9 @@ export default function Calendar() {
 
       {/* Footer */}
       <div className="pt-8 pb-4 text-center flex items-center justify-center gap-3">
-        <a
-          href="https://github.com/aaltheaa"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
-        >
+        <span className="text-sm text-gray-400">
           made with vibes ❤️
-        </a>
+        </span>
         <span className="text-gray-300">•</span>
         <button
           onClick={() => window.dispatchEvent(new Event('show-onboarding'))}
