@@ -13,6 +13,10 @@ export const metadata: Metadata = {
     canonical: '/',
   },
 
+  verification: {
+    google: 'ey-d4rpLM57Mv_ghRbmlWPO6ZVUHkHRsNLkJ0cpWiZA',
+  },
+
   openGraph: {
     title: 'RTO Planning — Return to Office Tracker & Calculator',
     description:
