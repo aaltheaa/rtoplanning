@@ -20,13 +20,13 @@ export default function Icon() {
       >
         <div
           style={{
-            fontSize: 14,
+            fontSize: 11,
             fontWeight: 800,
             color: 'white',
             letterSpacing: '-0.5px',
           }}
         >
-          RT
+          RTO
         </div>
       </div>
     ),
