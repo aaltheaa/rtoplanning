@@ -1438,6 +1438,27 @@ export default function Calendar() {
                   const weeksNeeded = Math.max(0, requiredForWindow - compliance.compliantWeeks)
                   const windowStartWeek = Math.max(1, selectedWeek - ROLLING_WINDOW_WEEKS + 1)
 
+                  // Date range for the window
+                  const windowFirstDate = getWeekStartDate(windowStartWeek, startWeekDate)
+                  const windowLastDate = new Date(getWeekStartDate(selectedWeek, startWeekDate))
+                  windowLastDate.setDate(windowLastDate.getDate() + 6)
+                  const fmt = (d: Date) => d.toLocaleDateString('default', { month: 'short', day: 'numeric' })
+                  const dateRangeStr = `${fmt(windowFirstDate)} – ${fmt(windowLastDate)}`
+
+                  // OOF days available (average-based): surplus above required average
+                  const oofDaysAvailableAvg = Math.max(0, Math.floor(((compliance.average ?? 0) - requiredDaysPerWeek) * requiredForWindow))
+
+                  // OOF days available (count-based): surplus from compliant weeks + buffer weeks
+                  const weekOfficeDaysInWindow: number[] = []
+                  for (let w = windowStartWeek; w <= selectedWeek; w++) {
+                    const ws = getWeekStartDate(w, startWeekDate)
+                    weekOfficeDaysInWindow.push(getOfficeDaysInWeek(ws, dayStatus))
+                  }
+                  const sortedWindowDays = [...weekOfficeDaysInWindow].sort((a, b) => b - a)
+                  const oofDaysAvailableCount =
+                    sortedWindowDays.slice(0, requiredForWindow).reduce((sum, d) => sum + Math.max(0, d - requiredDaysPerWeek), 0) +
+                    sortedWindowDays.slice(requiredForWindow).reduce((sum, d) => sum + d, 0)
+
                   return (
                     <div className="space-y-2">
                       {/* This week's office days */}
@@ -1498,8 +1519,14 @@ export default function Calendar() {
                       }`}>
                         {complianceAlgorithm === 'average' ? (
                           <>
-                            <p className="text-xs text-gray-600">
-                              Weeks {windowStartWeek}-{selectedWeek}: Average of best {requiredForWindow} = {compliance.average?.toFixed(1)} days
+                            <p className="text-xs font-medium text-gray-700">
+                              Weeks {windowStartWeek}–{selectedWeek} | {dateRangeStr}
+                            </p>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              Average of best {requiredForWindow} = {compliance.average?.toFixed(1)} days
+                            </p>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              OOF Days Available = {oofDaysAvailableAvg} day{oofDaysAvailableAvg !== 1 ? 's' : ''}
                             </p>
                             {riskStatus === 'not-compliant' && (
                               <p className="text-xs text-red-600 mt-1">
@@ -1519,8 +1546,14 @@ export default function Calendar() {
                           </>
                         ) : (
                           <>
-                            <p className="text-xs text-gray-600">
-                              Weeks {windowStartWeek}-{selectedWeek}: {compliance.compliantWeeks}/{compliance.windowSize} compliant
+                            <p className="text-xs font-medium text-gray-700">
+                              Weeks {windowStartWeek}–{selectedWeek} | {dateRangeStr}
+                            </p>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              {compliance.compliantWeeks}/{compliance.windowSize} compliant weeks
+                            </p>
+                            <p className="text-xs text-gray-600 mt-0.5">
+                              OOF Days Available = {oofDaysAvailableCount} day{oofDaysAvailableCount !== 1 ? 's' : ''}
                             </p>
                             {riskStatus === 'not-compliant' && weeksNeeded > 0 && (
                               <p className="text-xs text-red-600 mt-1">
