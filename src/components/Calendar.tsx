@@ -2,6 +2,7 @@
 
 import { useState, Fragment, useRef, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
+import FAQModal from './FAQModal'
 
 type AttendanceStatus = 'not-set' | 'office' | 'oof'
 
@@ -635,6 +636,7 @@ export default function Calendar() {
   const [dayStatus, setDayStatus] = useState<Record<string, AttendanceStatus>>({})
   const [startWeekDate, setStartWeekDate] = useState<Date | null>(null)
   const [isSettingStartWeek, setIsSettingStartWeek] = useState(false)
+  const [showFAQ, setShowFAQ] = useState(false)
   const [vacations, setVacations] = useState<VacationEvent[]>([])
   const [showVacationForm, setShowVacationForm] = useState(false)
   const [newVacationName, setNewVacationName] = useState('')
@@ -1772,7 +1774,16 @@ export default function Calendar() {
         >
           ?
         </button>
+        <span className="text-gray-300">•</span>
+        <button
+          onClick={() => setShowFAQ(true)}
+          className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          FAQs
+        </button>
       </div>
+
+      {showFAQ && <FAQModal onClose={() => setShowFAQ(false)} />}
     </div>
   )
 }
